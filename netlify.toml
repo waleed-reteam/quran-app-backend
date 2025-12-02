@@ -32,5 +32,5 @@
   # Increase the timeout for all functions to 30 seconds (max is 26s for free tier, 10s default)
   node_bundler = "esbuild"
   external_node_modules = ["mongoose", "redis", "pg", "pg-hstore", "sequelize"]
-  included_files = ["dist/**"]
+  included_files = ["dist/**", "swagger.json"]
 

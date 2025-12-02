@@ -11,7 +11,7 @@
       "description": "Development server"
     },
     {
-      "url": "https://api.quranapp.com/api/v1",
+      "url": "https://taqwa-api.netlify.app/api/v1",
       "description": "Production server"
     }
   ],
