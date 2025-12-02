@@ -1,0 +1,36 @@
+[build]
+  functions = "netlify/functions"
+  command = "npm run build"
+
+[dev]
+  command = "npm run dev"
+  port = 5000
+  functions = "netlify/functions"
+
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/server/:splat"
+  status = 200
+
+[[redirects]]
+  from = "/*"
+  to = "/.netlify/functions/server"
+  status = 200
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Access-Control-Allow-Origin = "*"
+    Access-Control-Allow-Methods = "GET, POST, PUT, DELETE, PATCH, OPTIONS"
+    Access-Control-Allow-Headers = "Origin, X-Requested-With, Content-Type, Accept, Authorization"
+    Access-Control-Allow-Credentials = "true"
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "DENY"
+    X-XSS-Protection = "1; mode=block"
+
+[functions]
+  # Increase the timeout for all functions to 30 seconds (max is 26s for free tier, 10s default)
+  node_bundler = "esbuild"
+  external_node_modules = ["mongoose", "redis", "pg", "pg-hstore", "sequelize"]
+  included_files = ["dist/**"]
+
