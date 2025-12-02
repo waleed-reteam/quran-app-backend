@@ -136,10 +136,13 @@ In Netlify Dashboard, go to **Site settings** → **Build & deploy** → **Build
 - **Publish directory**: Leave empty (not needed for serverless functions)
 - **Functions directory**: `netlify/functions`
 
-**Note**: 
+**Important**: 
+- The build command uses `npm ci` which requires `package-lock.json` to be committed to your repository
+- Make sure `package-lock.json` is NOT in `.gitignore` (it should be committed)
+- If you prefer not to commit `package-lock.json`, change the build command to `npm install && npm run build`
 - The build command installs all dependencies (including devDependencies) which are needed for TypeScript compilation
 - Netlify will automatically compile TypeScript files in the functions directory using esbuild
-- The `npm ci` command ensures a clean install of all dependencies
+- The `npm ci` command ensures a clean install of all dependencies with exact versions from package-lock.json
 
 ### Step 6: Deploy
 
