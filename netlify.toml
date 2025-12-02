@@ -27,6 +27,7 @@
     X-Content-Type-Options = "nosniff"
     X-Frame-Options = "DENY"
     X-XSS-Protection = "1; mode=block"
+    Content-Security-Policy = "default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com; connect-src 'self' https://unpkg.com https://taqwa-api.netlify.app; font-src 'self' https://unpkg.com data:; img-src 'self' data: https:;"
 
 [functions]
   # Increase the timeout for all functions to 30 seconds (max is 26s for free tier, 10s default)

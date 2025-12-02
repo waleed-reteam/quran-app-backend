@@ -21,7 +21,19 @@ const PORT = process.env.PORT || 5000;
 const API_VERSION = process.env.API_VERSION || 'v1';
 
 // Middleware
-app.use(helmet()); // Security headers
+// Configure Helmet with CSP that allows Swagger UI resources
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "https://unpkg.com"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://unpkg.com"],
+      connectSrc: ["'self'", "https://unpkg.com", "https://taqwa-api.netlify.app"],
+      fontSrc: ["'self'", "https://unpkg.com", "data:"],
+      imgSrc: ["'self'", "data:", "https:"],
+    },
+  },
+}));
 app.use(cors({
   origin: process.env.CORS_ORIGIN?.split(',') || '*',
   credentials: true,
