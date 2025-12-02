@@ -7,6 +7,12 @@ yarn.lock
 dist/
 build/
 
+# Netlify function compiled files
+netlify/functions/*.js
+netlify/functions/*.js.map
+netlify/functions/*.d.ts
+netlify/functions/*.d.ts.map
+
 # Environment variables
 .env
 .env.local
