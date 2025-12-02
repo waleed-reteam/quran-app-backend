@@ -132,11 +132,14 @@ This will compile your TypeScript code to JavaScript in the `dist` folder.
 
 In Netlify Dashboard, go to **Site settings** → **Build & deploy** → **Build settings**:
 
-- **Build command**: `npm run build`
+- **Build command**: `npm ci && npm run build` (or leave as configured in netlify.toml)
 - **Publish directory**: Leave empty (not needed for serverless functions)
 - **Functions directory**: `netlify/functions`
 
-**Note**: Netlify will automatically compile TypeScript files in the functions directory using esbuild, so you don't need to pre-compile the function.
+**Note**: 
+- The build command installs all dependencies (including devDependencies) which are needed for TypeScript compilation
+- Netlify will automatically compile TypeScript files in the functions directory using esbuild
+- The `npm ci` command ensures a clean install of all dependencies
 
 ### Step 6: Deploy
 

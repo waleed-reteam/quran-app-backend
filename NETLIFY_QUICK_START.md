@@ -20,9 +20,11 @@ git push origin main
 2. Click **"Add new site"** → **"Import an existing project"**
 3. Connect your Git repository
 4. Configure build settings:
-   - **Build command**: `npm run build`
+   - **Build command**: `npm ci && npm run build` (or leave as configured in netlify.toml)
    - **Publish directory**: (leave empty)
    - **Functions directory**: `netlify/functions`
+   
+   **Note**: The build command in `netlify.toml` is already configured correctly to install all dependencies including devDependencies needed for TypeScript compilation.
 5. Add all environment variables (see NETLIFY_DEPLOYMENT.md for full list)
 6. Click **"Deploy site"**
 
