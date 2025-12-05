@@ -1,6 +1,6 @@
 import axios from 'axios';
 import logger from '../utils/logger';
-import { redisClient } from '../config/database';
+import { redisGet, redisSet } from '../config/database';
 import Hadith from '../models/mongodb/Hadith';
 
 const HADITH_API_BASE = 'https://hadithapi.com/api';
@@ -102,7 +102,7 @@ export const getBooks = async (): Promise<HadithApiBook[]> => {
     const cacheKey = 'hadith:books';
     
     // Check cache first
-    const cached = await redisClient.get(cacheKey);
+    const cached = await redisGet(cacheKey);
     if (cached) {
       return JSON.parse(cached);
     }
@@ -121,7 +121,7 @@ export const getBooks = async (): Promise<HadithApiBook[]> => {
         const books = response.data.books;
         
         // Cache for 24 hours (books don't change often)
-        await redisClient.setEx(cacheKey, 86400, JSON.stringify(books));
+        await redisSet(cacheKey, JSON.stringify(books), 86400);
         
         return books;
       }
@@ -153,7 +153,7 @@ export const getBooks = async (): Promise<HadithApiBook[]> => {
     }
 
     if (books.length > 0) {
-      await redisClient.setEx(cacheKey, 3600, JSON.stringify(books));
+      await redisSet(cacheKey, JSON.stringify(books), 3600);
       logger.info(`Fetched ${books.length} books from database (fallback)`);
       return books;
     }
@@ -174,7 +174,7 @@ export const getChaptersByBook = async (
     const cacheKey = `hadith:chapters:${bookSlug}:${paginate || 'all'}`;
     
     // Check cache
-    const cached = await redisClient.get(cacheKey);
+    const cached = await redisGet(cacheKey);
     if (cached) {
       return JSON.parse(cached);
     }
@@ -195,7 +195,7 @@ export const getChaptersByBook = async (
         const chapters = response.data.chapters;
         
         // Cache for 12 hours
-        await redisClient.setEx(cacheKey, 43200, JSON.stringify(chapters));
+        await redisSet(cacheKey, JSON.stringify(chapters), 43200);
         
         return chapters;
       }
@@ -216,7 +216,7 @@ export const getChaptersByBook = async (
     }));
 
     if (transformedChapters.length > 0) {
-      await redisClient.setEx(cacheKey, 3600, JSON.stringify(transformedChapters));
+      await redisSet(cacheKey, JSON.stringify(transformedChapters), 3600);
       logger.info(`Fetched ${transformedChapters.length} chapters from database (fallback)`);
       return transformedChapters;
     }
@@ -248,7 +248,7 @@ export const getHadiths = async (filters: {
     
     // Check cache (only for non-search queries)
     if (!filters.hadithEnglish && !filters.hadithUrdu && !filters.hadithArabic) {
-      const cached = await redisClient.get(cacheKey);
+      const cached = await redisGet(cacheKey);
       if (cached) {
         return JSON.parse(cached);
       }
@@ -294,7 +294,7 @@ export const getHadiths = async (filters: {
         
         // Cache for 12 hours (only for non-search queries)
         if (!filters.hadithEnglish && !filters.hadithUrdu && !filters.hadithArabic) {
-          await redisClient.setEx(cacheKey, 43200, JSON.stringify(result));
+          await redisSet(cacheKey, JSON.stringify(result), 43200);
         }
         
         return result;
@@ -364,7 +364,7 @@ export const getHadiths = async (filters: {
 
     // Cache for 1 hour (shorter cache for fallback data)
     if (!filters.hadithEnglish && !filters.hadithUrdu && !filters.hadithArabic) {
-      await redisClient.setEx(cacheKey, 3600, JSON.stringify(result));
+      await redisSet(cacheKey, JSON.stringify(result), 3600);
     }
 
     logger.info(`Fetched ${transformedHadiths.length} hadiths from database (fallback)`);
@@ -379,7 +379,7 @@ export const getHadiths = async (filters: {
 export const getHadithById = async (id: number): Promise<HadithApiHadith | null> => {
   try {
     const cacheKey = `hadith:id:${id}`;
-    const cached = await redisClient.get(cacheKey);
+    const cached = await redisGet(cacheKey);
     if (cached) {
       return JSON.parse(cached);
     }
@@ -398,11 +398,11 @@ export const getHadithById = async (id: number): Promise<HadithApiHadith | null>
 
         if (response.data.status === 200 && response.data.hadith) {
           const hadith = response.data.hadith;
-          await redisClient.setEx(cacheKey, 86400, JSON.stringify(hadith));
+          await redisSet(cacheKey, JSON.stringify(hadith), 86400);
           return hadith;
         }
-      } catch (error: any) {
-        if (error.response?.status === 404) {
+      } catch (error: unknown) {
+        if (axios.isAxiosError(error) && error.response?.status === 404) {
           logger.debug(`Hadith ID endpoint not found, trying search for ID ${id}`);
         } else {
           throw error;
@@ -417,7 +417,7 @@ export const getHadithById = async (id: number): Promise<HadithApiHadith | null>
 
       if (searchResult.hadiths.length > 0) {
         const hadith = searchResult.hadiths[0];
-        await redisClient.setEx(cacheKey, 86400, JSON.stringify(hadith));
+        await redisSet(cacheKey, JSON.stringify(hadith), 86400);
         return hadith;
       }
     } catch (apiError) {
@@ -431,7 +431,7 @@ export const getHadithById = async (id: number): Promise<HadithApiHadith | null>
     
     if (hadith) {
       const transformed = transformHadithToApiFormat(hadith);
-      await redisClient.setEx(cacheKey, 86400, JSON.stringify(transformed));
+      await redisSet(cacheKey, JSON.stringify(transformed), 86400);
       logger.info(`Fetched hadith ${id} from database (fallback)`);
       return transformed;
     }

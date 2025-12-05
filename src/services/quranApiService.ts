@@ -1,6 +1,6 @@
 import axios from 'axios';
 import logger from '../utils/logger';
-import { redisClient } from '../config/database';
+import { redisGet, redisSet, ensureMongoDBConnected } from '../config/database';
 import Surah from '../models/mongodb/Quran';
 
 const QURAN_API_BASE = process.env.ALQURAN_API_URL || 'https://api.alquran.cloud/v1';
@@ -118,7 +118,7 @@ export const getEditions = async (filters?: {
   try {
     const cacheKey = `quran:editions:${JSON.stringify(filters || {})}`;
     
-    const cached = await redisClient.get(cacheKey);
+    const cached = await redisGet(cacheKey);
     if (cached) {
       return JSON.parse(cached);
     }
@@ -139,7 +139,7 @@ export const getEditions = async (filters?: {
         : [response.data.data];
       
       // Cache for 24 hours
-      await redisClient.setEx(cacheKey, 86400, JSON.stringify(editions));
+      await redisSet(cacheKey, JSON.stringify(editions), 86400);
       
       return editions;
     }
@@ -156,7 +156,7 @@ export const getSurahsList = async (): Promise<QuranApiSurah[]> => {
   try {
     const cacheKey = 'quran:surahs:list';
     
-    const cached = await redisClient.get(cacheKey);
+    const cached = await redisGet(cacheKey);
     if (cached) {
       return JSON.parse(cached);
     }
@@ -175,7 +175,7 @@ export const getSurahsList = async (): Promise<QuranApiSurah[]> => {
         }));
         
         // Cache for 24 hours
-        await redisClient.setEx(cacheKey, 86400, JSON.stringify(surahs));
+        await redisSet(cacheKey, JSON.stringify(surahs), 86400);
         
         return surahs;
       }
@@ -185,6 +185,10 @@ export const getSurahsList = async (): Promise<QuranApiSurah[]> => {
     }
 
     // Fallback to database
+    if (!(await ensureMongoDBConnected())) {
+      throw new Error('Database connection unavailable');
+    }
+    
     const surahs = await Surah.find({}, { ayahs: 0 }).sort({ number: 1 });
     if (surahs.length > 0) {
       const transformed = surahs.map(surah => ({
@@ -197,7 +201,7 @@ export const getSurahsList = async (): Promise<QuranApiSurah[]> => {
       }));
       
       // Cache for 1 hour (shorter cache for fallback data)
-      await redisClient.setEx(cacheKey, 3600, JSON.stringify(transformed));
+      await redisSet(cacheKey, JSON.stringify(transformed), 3600);
       
       logger.info(`Fetched ${transformed.length} surahs from database (fallback)`);
       return transformed;
@@ -219,7 +223,7 @@ export const getSurah = async (
     const editionId = edition || DEFAULT_ARABIC_EDITION;
     const cacheKey = `quran:surah:${surahNumber}:${editionId}`;
     
-    const cached = await redisClient.get(cacheKey);
+    const cached = await redisGet(cacheKey);
     if (cached) {
       return JSON.parse(cached);
     }
@@ -235,7 +239,7 @@ export const getSurah = async (
         const surah = response.data.data;
         
         // Cache for 12 hours
-        await redisClient.setEx(cacheKey, 43200, JSON.stringify(surah));
+        await redisSet(cacheKey, JSON.stringify(surah), 43200);
         
         return surah;
       }
@@ -279,7 +283,7 @@ export const getSurah = async (
       }
       
       // Cache for 1 hour (shorter cache for fallback data)
-      await redisClient.setEx(cacheKey, 3600, JSON.stringify(transformed));
+      await redisSet(cacheKey, JSON.stringify(transformed), 3600);
       
       logger.info(`Fetched surah ${surahNumber} from database (fallback)`);
       return transformed;
@@ -301,7 +305,7 @@ export const getSurahMultipleEditions = async (
     const editionsStr = editions.join(',');
     const cacheKey = `quran:surah:${surahNumber}:multi:${editionsStr}`;
     
-    const cached = await redisClient.get(cacheKey);
+    const cached = await redisGet(cacheKey);
     if (cached) {
       return JSON.parse(cached);
     }
@@ -317,7 +321,7 @@ export const getSurahMultipleEditions = async (
         const result = response.data.data;
         
         // Cache for 12 hours
-        await redisClient.setEx(cacheKey, 43200, JSON.stringify(result));
+        await redisSet(cacheKey, JSON.stringify(result), 43200);
         
         return result;
       }
@@ -357,7 +361,7 @@ export const getSurahMultipleEditions = async (
       }
       
       if (Object.keys(result).length > 0) {
-        await redisClient.setEx(cacheKey, 3600, JSON.stringify(result));
+        await redisSet(cacheKey, JSON.stringify(result), 3600);
         logger.info(`Fetched surah ${surahNumber} multiple editions from database (fallback)`);
         return result;
       }
@@ -379,7 +383,7 @@ export const getAyah = async (
     const editionId = edition || DEFAULT_ARABIC_EDITION;
     const cacheKey = `quran:ayah:${reference}:${editionId}`;
     
-    const cached = await redisClient.get(cacheKey);
+    const cached = await redisGet(cacheKey);
     if (cached) {
       return JSON.parse(cached);
     }
@@ -395,7 +399,7 @@ export const getAyah = async (
         const ayah = response.data.data;
         
         // Cache for 24 hours
-        await redisClient.setEx(cacheKey, 86400, JSON.stringify(ayah));
+        await redisSet(cacheKey, JSON.stringify(ayah), 86400);
         
         return ayah;
       }
@@ -440,7 +444,7 @@ export const getAyah = async (
           transformed = transformAyahToApiFormat(ayah);
         }
         
-        await redisClient.setEx(cacheKey, 86400, JSON.stringify(transformed));
+        await redisSet(cacheKey, JSON.stringify(transformed), 86400);
         logger.info(`Fetched ayah ${reference} from database (fallback)`);
         return transformed;
       }
@@ -462,7 +466,7 @@ export const getAyahMultipleEditions = async (
     const editionsStr = editions.join(',');
     const cacheKey = `quran:ayah:${reference}:multi:${editionsStr}`;
     
-    const cached = await redisClient.get(cacheKey);
+    const cached = await redisGet(cacheKey);
     if (cached) {
       return JSON.parse(cached);
     }
@@ -478,7 +482,7 @@ export const getAyahMultipleEditions = async (
         const result = response.data.data;
         
         // Cache for 24 hours
-        await redisClient.setEx(cacheKey, 86400, JSON.stringify(result));
+        await redisSet(cacheKey, JSON.stringify(result), 86400);
         
         return result;
       }
@@ -522,7 +526,7 @@ export const getAyahMultipleEditions = async (
         }
         
         if (Object.keys(result).length > 0) {
-          await redisClient.setEx(cacheKey, 86400, JSON.stringify(result));
+          await redisSet(cacheKey, JSON.stringify(result), 86400);
           logger.info(`Fetched ayah ${reference} multiple editions from database (fallback)`);
           return result;
         }
@@ -547,7 +551,7 @@ export const getJuz = async (
     const editionId = edition || DEFAULT_ARABIC_EDITION;
     const cacheKey = `quran:juz:${juzNumber}:${editionId}:${offset || 0}:${limit || 'all'}`;
     
-    const cached = await redisClient.get(cacheKey);
+    const cached = await redisGet(cacheKey);
     if (cached) {
       return JSON.parse(cached);
     }
@@ -569,7 +573,7 @@ export const getJuz = async (
           : [response.data.data];
         
         // Cache for 12 hours
-        await redisClient.setEx(cacheKey, 43200, JSON.stringify(ayahs));
+        await redisSet(cacheKey, JSON.stringify(ayahs), 43200);
         
         return ayahs;
       }
@@ -602,7 +606,7 @@ export const getJuz = async (
       if (offset) result = result.slice(offset);
       if (limit) result = result.slice(0, limit);
 
-      await redisClient.setEx(cacheKey, 3600, JSON.stringify(result));
+      await redisSet(cacheKey, JSON.stringify(result), 3600);
       logger.info(`Fetched juz ${juzNumber} from database (fallback)`);
       return result;
     }
@@ -625,7 +629,7 @@ export const getPage = async (
     const editionId = edition || DEFAULT_ARABIC_EDITION;
     const cacheKey = `quran:page:${pageNumber}:${editionId}:${offset || 0}:${limit || 'all'}`;
     
-    const cached = await redisClient.get(cacheKey);
+    const cached = await redisGet(cacheKey);
     if (cached) {
       return JSON.parse(cached);
     }
@@ -647,7 +651,7 @@ export const getPage = async (
           : [response.data.data];
         
         // Cache for 12 hours
-        await redisClient.setEx(cacheKey, 43200, JSON.stringify(ayahs));
+        await redisSet(cacheKey, JSON.stringify(ayahs), 43200);
         
         return ayahs;
       }
@@ -680,7 +684,7 @@ export const getPage = async (
       if (offset) result = result.slice(offset);
       if (limit) result = result.slice(0, limit);
 
-      await redisClient.setEx(cacheKey, 3600, JSON.stringify(result));
+      await redisSet(cacheKey, JSON.stringify(result), 3600);
       logger.info(`Fetched page ${pageNumber} from database (fallback)`);
       return result;
     }
@@ -703,7 +707,7 @@ export const getManzil = async (
     const editionId = edition || DEFAULT_ARABIC_EDITION;
     const cacheKey = `quran:manzil:${manzilNumber}:${editionId}:${offset || 0}:${limit || 'all'}`;
     
-    const cached = await redisClient.get(cacheKey);
+    const cached = await redisGet(cacheKey);
     if (cached) {
       return JSON.parse(cached);
     }
@@ -725,7 +729,7 @@ export const getManzil = async (
           : [response.data.data];
         
         // Cache for 12 hours
-        await redisClient.setEx(cacheKey, 43200, JSON.stringify(ayahs));
+        await redisSet(cacheKey, JSON.stringify(ayahs), 43200);
         
         return ayahs;
       }
@@ -758,7 +762,7 @@ export const getManzil = async (
       if (offset) result = result.slice(offset);
       if (limit) result = result.slice(0, limit);
 
-      await redisClient.setEx(cacheKey, 3600, JSON.stringify(result));
+      await redisSet(cacheKey, JSON.stringify(result), 3600);
       logger.info(`Fetched manzil ${manzilNumber} from database (fallback)`);
       return result;
     }
@@ -781,7 +785,7 @@ export const getRuku = async (
     const editionId = edition || DEFAULT_ARABIC_EDITION;
     const cacheKey = `quran:ruku:${rukuNumber}:${editionId}:${offset || 0}:${limit || 'all'}`;
     
-    const cached = await redisClient.get(cacheKey);
+    const cached = await redisGet(cacheKey);
     if (cached) {
       return JSON.parse(cached);
     }
@@ -803,7 +807,7 @@ export const getRuku = async (
           : [response.data.data];
         
         // Cache for 12 hours
-        await redisClient.setEx(cacheKey, 43200, JSON.stringify(ayahs));
+        await redisSet(cacheKey, JSON.stringify(ayahs), 43200);
         
         return ayahs;
       }
@@ -836,7 +840,7 @@ export const getRuku = async (
       if (offset) result = result.slice(offset);
       if (limit) result = result.slice(0, limit);
 
-      await redisClient.setEx(cacheKey, 3600, JSON.stringify(result));
+      await redisSet(cacheKey, JSON.stringify(result), 3600);
       logger.info(`Fetched ruku ${rukuNumber} from database (fallback)`);
       return result;
     }
@@ -859,7 +863,7 @@ export const getHizbQuarter = async (
     const editionId = edition || DEFAULT_ARABIC_EDITION;
     const cacheKey = `quran:hizb:${hizbNumber}:${editionId}:${offset || 0}:${limit || 'all'}`;
     
-    const cached = await redisClient.get(cacheKey);
+    const cached = await redisGet(cacheKey);
     if (cached) {
       return JSON.parse(cached);
     }
@@ -881,7 +885,7 @@ export const getHizbQuarter = async (
           : [response.data.data];
         
         // Cache for 12 hours
-        await redisClient.setEx(cacheKey, 43200, JSON.stringify(ayahs));
+        await redisSet(cacheKey, JSON.stringify(ayahs), 43200);
         
         return ayahs;
       }
@@ -914,7 +918,7 @@ export const getHizbQuarter = async (
       if (offset) result = result.slice(offset);
       if (limit) result = result.slice(0, limit);
 
-      await redisClient.setEx(cacheKey, 3600, JSON.stringify(result));
+      await redisSet(cacheKey, JSON.stringify(result), 3600);
       logger.info(`Fetched hizb quarter ${hizbNumber} from database (fallback)`);
       return result;
     }
@@ -932,7 +936,7 @@ export const getSajdaAyahs = async (edition?: string): Promise<QuranApiAyah[]> =
     const editionId = edition || DEFAULT_ARABIC_EDITION;
     const cacheKey = `quran:sajda:${editionId}`;
     
-    const cached = await redisClient.get(cacheKey);
+    const cached = await redisGet(cacheKey);
     if (cached) {
       return JSON.parse(cached);
     }
@@ -950,7 +954,7 @@ export const getSajdaAyahs = async (edition?: string): Promise<QuranApiAyah[]> =
           : [response.data.data];
         
         // Cache for 24 hours
-        await redisClient.setEx(cacheKey, 86400, JSON.stringify(ayahs));
+        await redisSet(cacheKey, JSON.stringify(ayahs), 86400);
         
         return ayahs;
       }
@@ -978,7 +982,7 @@ export const getSajdaAyahs = async (edition?: string): Promise<QuranApiAyah[]> =
           })
       );
 
-      await redisClient.setEx(cacheKey, 86400, JSON.stringify(ayahs));
+      await redisSet(cacheKey, JSON.stringify(ayahs), 86400);
       logger.info(`Fetched ${ayahs.length} sajda ayahs from database (fallback)`);
       return ayahs;
     }
@@ -1075,7 +1079,7 @@ export const getMeta = async (): Promise<Record<string, unknown> | null> => {
   try {
     const cacheKey = 'quran:meta';
     
-    const cached = await redisClient.get(cacheKey);
+    const cached = await redisGet(cacheKey);
     if (cached) {
       return JSON.parse(cached) as Record<string, unknown>;
     }
@@ -1089,7 +1093,7 @@ export const getMeta = async (): Promise<Record<string, unknown> | null> => {
       const meta = response.data.data;
       
       // Cache for 24 hours
-      await redisClient.setEx(cacheKey, 86400, JSON.stringify(meta));
+      await redisSet(cacheKey, JSON.stringify(meta), 86400);
       
       return meta;
     }

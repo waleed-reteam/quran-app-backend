@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import Dua from '../models/mongodb/Dua';
 import logger from '../utils/logger';
-import { redisClient } from '../config/database';
+import { redisGet, redisSet, ensureMongoDBConnected } from '../config/database';
 
 export const getAllDuas = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -11,12 +11,21 @@ export const getAllDuas = async (req: Request, res: Response): Promise<void> => 
     if (category) query.category = category;
 
     const cacheKey = `duas:${category || 'all'}:${page}:${limit}`;
-    const cached = await redisClient.get(cacheKey);
+    const cached = await redisGet(cacheKey);
     
     if (cached) {
       res.status(200).json({
         success: true,
         ...JSON.parse(cached),
+      });
+      return;
+    }
+
+    // Ensure MongoDB is connected
+    if (!(await ensureMongoDBConnected())) {
+      res.status(503).json({
+        success: false,
+        message: 'Database connection unavailable',
       });
       return;
     }
@@ -40,7 +49,7 @@ export const getAllDuas = async (req: Request, res: Response): Promise<void> => 
     };
 
     // Cache for 1 hour
-    await redisClient.setEx(cacheKey, 3600, JSON.stringify(result));
+    await redisSet(cacheKey, JSON.stringify(result), 3600);
 
     res.status(200).json({
       success: true,
@@ -58,6 +67,15 @@ export const getAllDuas = async (req: Request, res: Response): Promise<void> => 
 export const getDuaById = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
+
+    // Ensure MongoDB is connected
+    if (!(await ensureMongoDBConnected())) {
+      res.status(503).json({
+        success: false,
+        message: 'Database connection unavailable',
+      });
+      return;
+    }
 
     const dua = await Dua.findById(id);
 
@@ -87,7 +105,7 @@ export const getDuasByCategory = async (req: Request, res: Response): Promise<vo
     const { category } = req.params;
 
     const cacheKey = `duas:category:${category}`;
-    const cached = await redisClient.get(cacheKey);
+    const cached = await redisGet(cacheKey);
     
     if (cached) {
       res.status(200).json({
@@ -97,10 +115,19 @@ export const getDuasByCategory = async (req: Request, res: Response): Promise<vo
       return;
     }
 
+    // Ensure MongoDB is connected
+    if (!(await ensureMongoDBConnected())) {
+      res.status(503).json({
+        success: false,
+        message: 'Database connection unavailable',
+      });
+      return;
+    }
+
     const duas = await Dua.find({ category }).sort({ createdAt: -1 });
 
     // Cache for 1 hour
-    await redisClient.setEx(cacheKey, 3600, JSON.stringify(duas));
+    await redisSet(cacheKey, JSON.stringify(duas), 3600);
 
     res.status(200).json({
       success: true,

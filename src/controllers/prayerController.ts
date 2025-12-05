@@ -3,7 +3,7 @@ import axios from 'axios';
 import PrayerTime from '../models/mongodb/PrayerTime';
 import logger from '../utils/logger';
 import { AuthRequest } from '../middleware/auth';
-import { redisClient } from '../config/database';
+import { redisGet, redisSet, ensureMongoDBConnected } from '../config/database';
 
 const ALADHAN_API = process.env.ALADHAN_API_URL || 'https://api.aladhan.com/v1';
 
@@ -23,7 +23,7 @@ export const getPrayerTimes = async (req: AuthRequest, res: Response): Promise<v
     const cacheKey = `prayer:${latitude}:${longitude}:${dateStr}:${method}:${school}`;
     
     // Check cache
-    const cached = await redisClient.get(cacheKey);
+    const cached = await redisGet(cacheKey);
     if (cached) {
       res.status(200).json({
         success: true,
@@ -46,18 +46,23 @@ export const getPrayerTimes = async (req: AuthRequest, res: Response): Promise<v
     const data = response.data.data;
 
     // Save to database if user is authenticated
-    if (req.user) {
-      await PrayerTime.create({
-        userId: req.user.id,
-        latitude: parseFloat(latitude as string),
-        longitude: parseFloat(longitude as string),
-        city: data.meta.timezone || 'Unknown',
-        country: 'Unknown',
-        method: parseInt(method as string, 10),
-        school: parseInt(school as string, 10),
-        date: new Date(dateStr as string),
-        timings: data.timings,
-      });
+    if (req.user && await ensureMongoDBConnected()) {
+      try {
+        await PrayerTime.create({
+          userId: req.user.id,
+          latitude: parseFloat(latitude as string),
+          longitude: parseFloat(longitude as string),
+          city: data.meta.timezone || 'Unknown',
+          country: 'Unknown',
+          method: parseInt(method as string, 10),
+          school: parseInt(school as string, 10),
+          date: new Date(dateStr as string),
+          timings: data.timings,
+        });
+      } catch (dbError) {
+        logger.error('Failed to save prayer time to database:', dbError);
+        // Continue even if database save fails
+      }
     }
 
     const result = {
@@ -67,7 +72,7 @@ export const getPrayerTimes = async (req: AuthRequest, res: Response): Promise<v
     };
 
     // Cache for 12 hours
-    await redisClient.setEx(cacheKey, 43200, JSON.stringify(result));
+    await redisSet(cacheKey, JSON.stringify(result), 43200);
 
     res.status(200).json({
       success: true,
@@ -98,7 +103,7 @@ export const getPrayerTimesByCity = async (req: AuthRequest, res: Response): Pro
     const cacheKey = `prayer:city:${city}:${country}:${dateStr}:${method}:${school}`;
     
     // Check cache
-    const cached = await redisClient.get(cacheKey);
+    const cached = await redisGet(cacheKey);
     if (cached) {
       res.status(200).json({
         success: true,
@@ -127,7 +132,7 @@ export const getPrayerTimesByCity = async (req: AuthRequest, res: Response): Pro
     };
 
     // Cache for 12 hours
-    await redisClient.setEx(cacheKey, 43200, JSON.stringify(result));
+    await redisSet(cacheKey, JSON.stringify(result), 43200);
 
     res.status(200).json({
       success: true,
@@ -157,7 +162,7 @@ export const getMonthlyPrayerTimes = async (req: AuthRequest, res: Response): Pr
     const cacheKey = `prayer:monthly:${latitude}:${longitude}:${month}:${year}:${method}:${school}`;
     
     // Check cache
-    const cached = await redisClient.get(cacheKey);
+    const cached = await redisGet(cacheKey);
     if (cached) {
       res.status(200).json({
         success: true,
@@ -180,7 +185,7 @@ export const getMonthlyPrayerTimes = async (req: AuthRequest, res: Response): Pr
     const data = response.data.data;
 
     // Cache for 24 hours
-    await redisClient.setEx(cacheKey, 86400, JSON.stringify(data));
+    await redisSet(cacheKey, JSON.stringify(data), 86400);
 
     res.status(200).json({
       success: true,
@@ -284,7 +289,7 @@ export const getQiblaDirection = async (req: Request, res: Response): Promise<vo
     const cacheKey = `qibla:${latitude}:${longitude}`;
     
     // Check cache
-    const cached = await redisClient.get(cacheKey);
+    const cached = await redisGet(cacheKey);
     if (cached) {
       res.status(200).json({
         success: true,
@@ -300,7 +305,7 @@ export const getQiblaDirection = async (req: Request, res: Response): Promise<vo
     const data = response.data.data;
 
     // Cache for 30 days (qibla doesn't change)
-    await redisClient.setEx(cacheKey, 2592000, JSON.stringify(data));
+    await redisSet(cacheKey, JSON.stringify(data), 2592000);
 
     res.status(200).json({
       success: true,
