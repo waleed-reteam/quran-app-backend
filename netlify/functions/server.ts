@@ -19,6 +19,9 @@ dotenv.config();
 const app: Application = express();
 const API_VERSION = process.env.API_VERSION || 'v1';
 
+// Trust proxy - Required for Netlify to get correct IP addresses
+app.set('trust proxy', true);
+
 // Middleware
 // Configure Helmet with CSP that allows Swagger UI resources
 app.use(helmet({

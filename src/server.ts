@@ -20,6 +20,9 @@ const app: Application = express();
 const PORT = process.env.PORT || 5000;
 const API_VERSION = process.env.API_VERSION || 'v1';
 
+// Trust proxy - Required when behind a proxy (e.g., Netlify, nginx, etc.)
+app.set('trust proxy', true);
+
 // Middleware
 // Configure Helmet with CSP that allows Swagger UI resources
 app.use(helmet({
