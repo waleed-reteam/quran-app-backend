@@ -174,10 +174,10 @@ const ensureInitialized = async (req: express.Request, res: express.Response, ne
   // Only wait if initialization is in progress and we haven't timed out
   if (initializationPromise && !initialized) {
     try {
-      // Wait max 2 seconds for initialization
+      // Wait max 3 seconds for initialization (increased from 2)
       await Promise.race([
         initializationPromise,
-        new Promise(resolve => setTimeout(resolve, 2000))
+        new Promise(resolve => setTimeout(resolve, 3000))
       ]);
     } catch (error) {
       logger.warn('Initialization wait timeout, proceeding anyway');
@@ -185,8 +185,9 @@ const ensureInitialized = async (req: express.Request, res: express.Response, ne
   }
   
   // If there was an initialization error, log it but continue
+  // Individual endpoints will handle DB connection checks
   if (initializationError) {
-    logger.warn('Request proceeding despite initialization errors');
+    logger.warn('Request proceeding despite initialization errors - endpoints will handle DB connection');
   }
   
   next();

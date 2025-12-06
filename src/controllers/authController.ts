@@ -7,6 +7,7 @@ import { generateOtp, getOtpExpiry } from '../utils/otp';
 import { sendSignupEmail, sendForgotPasswordEmail } from '../services/emailService';
 import logger from '../utils/logger';
 import { AuthRequest } from '../middleware/auth';
+import { ensureMongoDBConnected } from '../config/database';
 import {
   UserNotFoundException,
   InvalidOtpException,
@@ -28,6 +29,16 @@ export const getUserVerificationOtp = async (
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       throw new ValidationException(errors.array());
+    }
+
+    // Ensure MongoDB is connected
+    const isConnected = await ensureMongoDBConnected();
+    if (!isConnected) {
+      res.status(503).json({
+        success: false,
+        message: 'Database connection unavailable. Please try again later.',
+      });
+      return;
     }
 
     const { email } = req.body;
@@ -94,6 +105,14 @@ export const getUserVerificationOtp = async (
       });
       return;
     }
+    // Check for MongoDB connection errors
+    if (error.name === 'MongoServerError' || error.name === 'MongooseError' || error.message?.includes('connection')) {
+      res.status(503).json({
+        success: false,
+        message: 'Database connection error. Please try again later.',
+      });
+      return;
+    }
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -107,6 +126,16 @@ export const verifyAccount = async (req: Request, res: Response): Promise<void> 
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       throw new ValidationException(errors.array());
+    }
+
+    // Ensure MongoDB is connected
+    const isConnected = await ensureMongoDBConnected();
+    if (!isConnected) {
+      res.status(503).json({
+        success: false,
+        message: 'Database connection unavailable. Please try again later.',
+      });
+      return;
     }
 
     const { email, otp: otpCode } = req.body;
@@ -162,6 +191,14 @@ export const verifyAccount = async (req: Request, res: Response): Promise<void> 
       });
       return;
     }
+    // Check for MongoDB connection errors
+    if (error.name === 'MongoServerError' || error.name === 'MongooseError' || error.message?.includes('connection')) {
+      res.status(503).json({
+        success: false,
+        message: 'Database connection error. Please try again later.',
+      });
+      return;
+    }
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -175,6 +212,16 @@ export const register = async (req: Request, res: Response): Promise<void> => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       throw new ValidationException(errors.array());
+    }
+
+    // Ensure MongoDB is connected
+    const isConnected = await ensureMongoDBConnected();
+    if (!isConnected) {
+      res.status(503).json({
+        success: false,
+        message: 'Database connection unavailable. Please try again later.',
+      });
+      return;
     }
 
     const { email, password, name } = req.body;
@@ -242,6 +289,14 @@ export const register = async (req: Request, res: Response): Promise<void> => {
       });
       return;
     }
+    // Check for MongoDB connection errors
+    if (error.name === 'MongoServerError' || error.name === 'MongooseError' || error.message?.includes('connection')) {
+      res.status(503).json({
+        success: false,
+        message: 'Database connection error. Please try again later.',
+      });
+      return;
+    }
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -255,6 +310,16 @@ export const login = async (req: Request, res: Response): Promise<void> => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       throw new ValidationException(errors.array());
+    }
+
+    // Ensure MongoDB is connected
+    const isConnected = await ensureMongoDBConnected();
+    if (!isConnected) {
+      res.status(503).json({
+        success: false,
+        message: 'Database connection unavailable. Please try again later.',
+      });
+      return;
     }
 
     const { email, password } = req.body;
@@ -314,6 +379,14 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       });
       return;
     }
+    // Check for MongoDB connection errors
+    if (error.name === 'MongoServerError' || error.name === 'MongooseError' || error.message?.includes('connection')) {
+      res.status(503).json({
+        success: false,
+        message: 'Database connection error. Please try again later.',
+      });
+      return;
+    }
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -324,6 +397,16 @@ export const login = async (req: Request, res: Response): Promise<void> => {
 // Google Auth (keep existing functionality)
 export const googleAuth = async (req: Request, res: Response): Promise<void> => {
   try {
+    // Ensure MongoDB is connected
+    const isConnected = await ensureMongoDBConnected();
+    if (!isConnected) {
+      res.status(503).json({
+        success: false,
+        message: 'Database connection unavailable. Please try again later.',
+      });
+      return;
+    }
+
     const { email, name, profilePicture, providerId } = req.body;
     // Note: idToken is available in req.body but not used yet
     // In production, verify the idToken with Google
@@ -371,8 +454,16 @@ export const googleAuth = async (req: Request, res: Response): Promise<void> => 
         refreshToken,
       },
     });
-  } catch (error) {
+  } catch (error: any) {
     logger.error('Google auth error:', error);
+    // Check for MongoDB connection errors
+    if (error.name === 'MongoServerError' || error.name === 'MongooseError' || error.message?.includes('connection')) {
+      res.status(503).json({
+        success: false,
+        message: 'Database connection error. Please try again later.',
+      });
+      return;
+    }
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -383,6 +474,16 @@ export const googleAuth = async (req: Request, res: Response): Promise<void> => 
 // Apple Auth (keep existing functionality)
 export const appleAuth = async (req: Request, res: Response): Promise<void> => {
   try {
+    // Ensure MongoDB is connected
+    const isConnected = await ensureMongoDBConnected();
+    if (!isConnected) {
+      res.status(503).json({
+        success: false,
+        message: 'Database connection unavailable. Please try again later.',
+      });
+      return;
+    }
+
     const { email, name, providerId } = req.body;
     // Note: identityToken is available in req.body but not used yet
     // In production, verify the identityToken with Apple
@@ -429,8 +530,16 @@ export const appleAuth = async (req: Request, res: Response): Promise<void> => {
         refreshToken,
       },
     });
-  } catch (error) {
+  } catch (error: any) {
     logger.error('Apple auth error:', error);
+    // Check for MongoDB connection errors
+    if (error.name === 'MongoServerError' || error.name === 'MongooseError' || error.message?.includes('connection')) {
+      res.status(503).json({
+        success: false,
+        message: 'Database connection error. Please try again later.',
+      });
+      return;
+    }
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -447,6 +556,16 @@ export const refreshToken = async (req: Request, res: Response): Promise<void> =
       res.status(400).json({
         success: false,
         message: 'Refresh token required',
+      });
+      return;
+    }
+
+    // Ensure MongoDB is connected
+    const isConnected = await ensureMongoDBConnected();
+    if (!isConnected) {
+      res.status(503).json({
+        success: false,
+        message: 'Database connection unavailable. Please try again later.',
       });
       return;
     }
@@ -472,8 +591,16 @@ export const refreshToken = async (req: Request, res: Response): Promise<void> =
         refreshToken: newRefreshToken,
       },
     });
-  } catch (error) {
+  } catch (error: any) {
     logger.error('Refresh token error:', error);
+    // Check for MongoDB connection errors
+    if (error.name === 'MongoServerError' || error.name === 'MongooseError' || error.message?.includes('connection')) {
+      res.status(503).json({
+        success: false,
+        message: 'Database connection error. Please try again later.',
+      });
+      return;
+    }
     res.status(401).json({
       success: false,
       message: 'Invalid refresh token',
@@ -484,14 +611,32 @@ export const refreshToken = async (req: Request, res: Response): Promise<void> =
 // Get current user
 export const getMe = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    // Ensure MongoDB is connected
+    const isConnected = await ensureMongoDBConnected();
+    if (!isConnected) {
+      res.status(503).json({
+        success: false,
+        message: 'Database connection unavailable. Please try again later.',
+      });
+      return;
+    }
+
     const user = await User.findById(req.user.id).select('-password');
 
     res.status(200).json({
       success: true,
       data: user,
     });
-  } catch (error) {
+  } catch (error: any) {
     logger.error('Get me error:', error);
+    // Check for MongoDB connection errors
+    if (error.name === 'MongoServerError' || error.name === 'MongooseError' || error.message?.includes('connection')) {
+      res.status(503).json({
+        success: false,
+        message: 'Database connection error. Please try again later.',
+      });
+      return;
+    }
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -502,6 +647,16 @@ export const getMe = async (req: AuthRequest, res: Response): Promise<void> => {
 // Update profile
 export const updateProfile = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    // Ensure MongoDB is connected
+    const isConnected = await ensureMongoDBConnected();
+    if (!isConnected) {
+      res.status(503).json({
+        success: false,
+        message: 'Database connection unavailable. Please try again later.',
+      });
+      return;
+    }
+
     const { name, language, timezone, prayerNotifications, reminderSettings } =
       req.body;
 
@@ -527,8 +682,16 @@ export const updateProfile = async (req: AuthRequest, res: Response): Promise<vo
       success: true,
       data: user,
     });
-  } catch (error) {
+  } catch (error: any) {
     logger.error('Update profile error:', error);
+    // Check for MongoDB connection errors
+    if (error.name === 'MongoServerError' || error.name === 'MongooseError' || error.message?.includes('connection')) {
+      res.status(503).json({
+        success: false,
+        message: 'Database connection error. Please try again later.',
+      });
+      return;
+    }
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -542,6 +705,16 @@ export const updateFCMToken = async (
   res: Response
 ): Promise<void> => {
   try {
+    // Ensure MongoDB is connected
+    const isConnected = await ensureMongoDBConnected();
+    if (!isConnected) {
+      res.status(503).json({
+        success: false,
+        message: 'Database connection unavailable. Please try again later.',
+      });
+      return;
+    }
+
     const { fcmToken } = req.body;
 
     const user = await User.findById(req.user.id);
@@ -560,8 +733,16 @@ export const updateFCMToken = async (
       success: true,
       message: 'FCM token updated',
     });
-  } catch (error) {
+  } catch (error: any) {
     logger.error('Update FCM token error:', error);
+    // Check for MongoDB connection errors
+    if (error.name === 'MongoServerError' || error.name === 'MongooseError' || error.message?.includes('connection')) {
+      res.status(503).json({
+        success: false,
+        message: 'Database connection error. Please try again later.',
+      });
+      return;
+    }
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -575,6 +756,16 @@ export const forgotPassword = async (req: Request, res: Response): Promise<void>
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       throw new ValidationException(errors.array());
+    }
+
+    // Ensure MongoDB is connected
+    const isConnected = await ensureMongoDBConnected();
+    if (!isConnected) {
+      res.status(503).json({
+        success: false,
+        message: 'Database connection unavailable. Please try again later.',
+      });
+      return;
     }
 
     const { email } = req.body;
@@ -634,6 +825,14 @@ export const forgotPassword = async (req: Request, res: Response): Promise<void>
       });
       return;
     }
+    // Check for MongoDB connection errors
+    if (error.name === 'MongoServerError' || error.name === 'MongooseError' || error.message?.includes('connection')) {
+      res.status(503).json({
+        success: false,
+        message: 'Database connection error. Please try again later.',
+      });
+      return;
+    }
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -650,6 +849,16 @@ export const verifyForgotPassword = async (
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       throw new ValidationException(errors.array());
+    }
+
+    // Ensure MongoDB is connected
+    const isConnected = await ensureMongoDBConnected();
+    if (!isConnected) {
+      res.status(503).json({
+        success: false,
+        message: 'Database connection unavailable. Please try again later.',
+      });
+      return;
     }
 
     const { email, otp: otpCode } = req.body;
@@ -699,6 +908,14 @@ export const verifyForgotPassword = async (
       });
       return;
     }
+    // Check for MongoDB connection errors
+    if (error.name === 'MongoServerError' || error.name === 'MongooseError' || error.message?.includes('connection')) {
+      res.status(503).json({
+        success: false,
+        message: 'Database connection error. Please try again later.',
+      });
+      return;
+    }
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -712,6 +929,16 @@ export const resetPassword = async (req: Request, res: Response): Promise<void> 
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       throw new ValidationException(errors.array());
+    }
+
+    // Ensure MongoDB is connected
+    const isConnected = await ensureMongoDBConnected();
+    if (!isConnected) {
+      res.status(503).json({
+        success: false,
+        message: 'Database connection unavailable. Please try again later.',
+      });
+      return;
     }
 
     const { email, password, otp: otpCode } = req.body;
@@ -775,6 +1002,14 @@ export const resetPassword = async (req: Request, res: Response): Promise<void> 
       });
       return;
     }
+    // Check for MongoDB connection errors
+    if (error.name === 'MongoServerError' || error.name === 'MongooseError' || error.message?.includes('connection')) {
+      res.status(503).json({
+        success: false,
+        message: 'Database connection error. Please try again later.',
+      });
+      return;
+    }
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -806,6 +1041,14 @@ export const logout = async (req: AuthRequest, res: Response): Promise<void> => 
       res.status(error.status).json({
         success: false,
         message: error.message,
+      });
+      return;
+    }
+    // Check for MongoDB connection errors (though logout doesn't need DB)
+    if (error.name === 'MongoServerError' || error.name === 'MongooseError' || error.message?.includes('connection')) {
+      res.status(503).json({
+        success: false,
+        message: 'Database connection error. Please try again later.',
       });
       return;
     }
