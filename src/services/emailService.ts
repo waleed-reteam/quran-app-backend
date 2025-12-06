@@ -4,6 +4,31 @@ import path from 'path';
 import fs from 'fs';
 import ejs from 'ejs';
 
+// Helper function to resolve template path (works in both local and Netlify environments)
+const getTemplatePath = (templateName: string): string => {
+  // Try multiple possible locations
+  const possiblePaths = [
+    // Standard build location (dist/views/emails/)
+    path.join(__dirname, '../views/emails', templateName),
+    // Netlify Functions location (from process.cwd())
+    path.join(process.cwd(), 'dist', 'views', 'emails', templateName),
+    // Alternative Netlify location
+    path.join(process.cwd(), 'views', 'emails', templateName),
+    // Source location (for development)
+    path.join(process.cwd(), 'src', 'views', 'emails', templateName),
+  ];
+
+  // Return the first path that exists, or the first one as fallback
+  for (const templatePath of possiblePaths) {
+    if (fs.existsSync(templatePath)) {
+      return templatePath;
+    }
+  }
+
+  // If none exist, return the standard path (will trigger fallback template)
+  return possiblePaths[0];
+};
+
 // Email configuration
 const emailConfig = {
   service: process.env.MAIL_SERVICE || 'gmail',
@@ -38,12 +63,17 @@ export const sendSignupEmail = async (data: {
     const { toEmail, name, heading, otp } = data;
 
     // Read email template
-    const templatePath = path.join(__dirname, '../views/emails/signup.ejs');
+    const templatePath = getTemplatePath('signup.ejs');
     let htmlTemplate: string;
 
     try {
       htmlTemplate = fs.readFileSync(templatePath, 'utf-8');
+      logger.info(`Signup email template loaded from: ${templatePath}`);
     } catch (error) {
+      // Log the error for debugging
+      logger.warn(`Failed to load signup email template from ${templatePath}:`, error);
+      logger.warn(`Current working directory: ${process.cwd()}`);
+      logger.warn(`__dirname: ${__dirname}`);
       // If template doesn't exist, use a simple HTML template
       htmlTemplate = `
         <!DOCTYPE html>
@@ -127,12 +157,17 @@ export const sendOtpEmail = async (data: {
     }
 
     // Read email template
-    const templatePath = path.join(__dirname, '../views/emails/otp.ejs');
+    const templatePath = getTemplatePath('otp.ejs');
     let htmlTemplate: string;
 
     try {
       htmlTemplate = fs.readFileSync(templatePath, 'utf-8');
+      logger.info(`OTP email template loaded from: ${templatePath}`);
     } catch (error) {
+      // Log the error for debugging
+      logger.warn(`Failed to load OTP email template from ${templatePath}:`, error);
+      logger.warn(`Current working directory: ${process.cwd()}`);
+      logger.warn(`__dirname: ${__dirname}`);
       // If template doesn't exist, use a simple HTML template
       htmlTemplate = `
         <!DOCTYPE html>
@@ -189,15 +224,17 @@ export const sendForgotPasswordEmail = async (data: {
     const { toEmail, name, heading, otp } = data;
 
     // Read email template
-    const templatePath = path.join(
-      __dirname,
-      '../views/emails/forgot-password.ejs'
-    );
+    const templatePath = getTemplatePath('forgot-password.ejs');
     let htmlTemplate: string;
 
     try {
       htmlTemplate = fs.readFileSync(templatePath, 'utf-8');
+      logger.info(`Forgot password email template loaded from: ${templatePath}`);
     } catch (error) {
+      // Log the error for debugging
+      logger.warn(`Failed to load forgot password email template from ${templatePath}:`, error);
+      logger.warn(`Current working directory: ${process.cwd()}`);
+      logger.warn(`__dirname: ${__dirname}`);
       // If template doesn't exist, use a simple HTML template
       htmlTemplate = `
         <!DOCTYPE html>
