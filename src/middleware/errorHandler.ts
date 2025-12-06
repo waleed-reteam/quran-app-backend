@@ -9,12 +9,14 @@ export const errorHandler = (err: any, req: Request, res: Response, _next: NextF
     method: req.method,
   });
 
-  const statusCode = err.statusCode || 500;
+  // Handle custom exceptions (status) or standard errors (statusCode)
+  const statusCode = err.status || err.statusCode || 500;
   const message = err.message || 'Internal Server Error';
 
   res.status(statusCode).json({
     success: false,
     message,
+    ...(err.errors && { errors: err.errors }), // Include validation errors if present
     ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),
   });
 };
