@@ -1,10 +1,20 @@
-import axios from 'axios';
 import logger from '../utils/logger';
 import { redisGet, redisSet } from '../config/database';
 import Hadith from '../models/mongodb/Hadith';
 
-const HADITH_API_BASE = 'https://hadithapi.com/api';
-const HADITH_API_KEY = process.env.HADITH_API_KEY || '$2y$10$unZvEIUjLokiEp5auSAYpe6uqmglNe17sOkYbSi62ibUEqVdPNyS';
+// Collection Display Names Mapping
+const COLLECTION_NAMES: { [key: string]: string } = {
+  'sahih-bukhari': 'Sahih al-Bukhari',
+  'sahih-muslim': 'Sahih Muslim',
+  'sunan-an-nasai': 'Sunan an-Nasa\'i',
+  'sunan-abu-dawud': 'Sunan Abu Dawud',
+  'jami-at-tirmidhi': 'Jami` at-Tirmidhi',
+  'sunan-ibn-majah': 'Sunan Ibn Majah',
+  'muwatta-malik': 'Muwatta Malik',
+  'musnad-ahmad': 'Musnad Ahmad',
+  'sunan-darimi': 'Sunan ad-Darimi',
+  'riyadh-as-salihin': 'Riyad as-Salihin',
+};
 
 interface HadithApiBook {
   id: number;
@@ -43,12 +53,6 @@ interface HadithApiHadith {
   chapter: HadithApiChapter;
 }
 
-interface HadithApiResponse {
-  status: number;
-  message: string;
-  [key: string]: unknown;
-}
-
 interface HadithPagination {
   current_page: number;
   last_page: number;
@@ -59,11 +63,14 @@ interface HadithPagination {
 }
 
 // Helper to transform MongoDB hadith to API format
-const transformHadithToApiFormat = (hadith: { _id?: { toString: () => string } | unknown; hadithNumber: string; narrator?: string; englishText: string; urduText?: string; arabicText: string; chapterNumber?: number; collectionName: string; bookNumber?: number; book: string; grade?: string; chapter: string }): HadithApiHadith => {
+const transformHadithToApiFormat = (hadith: any): HadithApiHadith => {
+  const id = parseInt(hadith.hadithNumber) || 
+             (hadith._id && typeof hadith._id === 'object' && 'toString' in hadith._id 
+               ? parseInt(hadith._id.toString().slice(-8), 16) 
+               : 0);
+
   return {
-    id: hadith._id && typeof hadith._id === 'object' && 'toString' in hadith._id 
-      ? parseInt(hadith._id.toString().slice(-8), 16) || 0 
-      : 0, // Generate numeric ID from ObjectId
+    id: id,
     hadithNumber: hadith.hadithNumber,
     englishNarrator: hadith.narrator || '',
     hadithEnglish: hadith.englishText,
@@ -77,7 +84,7 @@ const transformHadithToApiFormat = (hadith: { _id?: { toString: () => string } |
     status: hadith.grade || '',
     book: {
       id: hadith.bookNumber || 0,
-      bookName: hadith.book,
+      bookName: COLLECTION_NAMES[hadith.collectionName] || hadith.collectionName,
       writerName: '',
       aboutWriter: null,
       writerDeath: '',
@@ -96,10 +103,10 @@ const transformHadithToApiFormat = (hadith: { _id?: { toString: () => string } |
   };
 };
 
-// Get all books - with fallback
+// Get all books (Collections)
 export const getBooks = async (): Promise<HadithApiBook[]> => {
   try {
-    const cacheKey = 'hadith:books';
+    const cacheKey = 'hadith:books:v2';
     
     // Check cache first
     const cached = await redisGet(cacheKey);
@@ -107,71 +114,52 @@ export const getBooks = async (): Promise<HadithApiBook[]> => {
       return JSON.parse(cached);
     }
 
-    // Try API first
-    try {
-      const response = await axios.get<HadithApiResponse & { books: HadithApiBook[] }>(
-        `${HADITH_API_BASE}/books`,
-        {
-          params: { apiKey: HADITH_API_KEY },
-          timeout: 5000,
-        }
-      );
-
-      if (response.data.status === 200 && response.data.books) {
-        const books = response.data.books;
-        
-        // Cache for 24 hours (books don't change often)
-        await redisSet(cacheKey, JSON.stringify(books), 86400);
-        
-        return books;
-      }
-    } catch (apiError) {
-      logger.warn('Hadith API failed, falling back to database:', apiError);
-      // Fall through to database fallback
-    }
-
-    // Fallback to database
     const collections = await Hadith.distinct('collectionName');
     const books: HadithApiBook[] = [];
 
-    for (const collection of collections) {
+    for (let i = 0; i < collections.length; i++) {
+      const collection = collections[i];
       const hadithCount = await Hadith.countDocuments({ collectionName: collection });
-      const bookInfo = await Hadith.findOne({ collectionName: collection });
+      // We count unique "chapters" (which are actually Books/Kitabs in our new mapping)
+      const chaptersCount = (await Hadith.distinct('book', { collectionName: collection })).length;
 
-      if (bookInfo) {
-        books.push({
-          id: bookInfo.bookNumber || 0,
-          bookName: bookInfo.book,
-          writerName: '',
-          aboutWriter: null,
-          writerDeath: '',
-          bookSlug: collection,
-          hadiths_count: hadithCount.toString(),
-          chapters_count: '0',
-        });
-      }
+      books.push({
+        id: i + 1, 
+        bookName: COLLECTION_NAMES[collection] || collection,
+        writerName: '',
+        aboutWriter: null,
+        writerDeath: '',
+        bookSlug: collection,
+        hadiths_count: hadithCount.toString(),
+        chapters_count: chaptersCount.toString(),
+      });
     }
 
     if (books.length > 0) {
-      await redisSet(cacheKey, JSON.stringify(books), 3600);
-      logger.info(`Fetched ${books.length} books from database (fallback)`);
+      await redisSet(cacheKey, JSON.stringify(books), 86400);
+      logger.info(`Fetched ${books.length} collections from database`);
       return books;
     }
 
-    throw new Error('Failed to fetch books from Hadith API and database is empty');
+    return [];
   } catch (error) {
-    logger.error('Get books from Hadith API error:', error);
+    logger.error('Get books error:', error);
     throw error;
   }
 };
 
-// Get chapters by book slug - with fallback
+// Get chapters by book slug (Returns Kitabs as Chapters)
 export const getChaptersByBook = async (
   bookSlug: string,
-  paginate?: number
-): Promise<HadithApiChapter[]> => {
+  paginate?: number,
+  page?: number
+): Promise<{ chapters: HadithApiChapter[], pagination: HadithPagination }> => {
   try {
-    const cacheKey = `hadith:chapters:${bookSlug}:${paginate || 'all'}`;
+    const limit = paginate || 25;
+    const currentPage = page || 1;
+    const skip = (currentPage - 1) * limit;
+    
+    const cacheKey = `hadith:chapters:${bookSlug}:${limit}:${currentPage}:v2`;
     
     // Check cache
     const cached = await redisGet(cacheKey);
@@ -179,56 +167,76 @@ export const getChaptersByBook = async (
       return JSON.parse(cached);
     }
 
-    // Try API first
-    try {
-      const params: Record<string, string | number> = { apiKey: HADITH_API_KEY };
-      if (paginate) {
-        params.paginate = paginate;
-      }
+    // Base pipeline for grouping
+    const groupPipeline = [
+      { $match: { collectionName: bookSlug } },
+      { $group: { 
+          _id: "$book", 
+          bookNumber: { $first: "$bookNumber" },
+          firstId: { $first: "$_id" } 
+        } 
+      },
+      { $sort: { bookNumber: 1 as 1 } }
+    ];
 
-      const response = await axios.get<HadithApiResponse & { chapters: HadithApiChapter[] }>(
-        `${HADITH_API_BASE}/${bookSlug}/chapters`,
-        { params, timeout: 5000 }
-      );
+    // Get total count and paginated data
+    const [chaptersData, totalResult] = await Promise.all([
+      Hadith.aggregate([
+        ...groupPipeline,
+        { $skip: skip },
+        { $limit: limit }
+      ]),
+      Hadith.aggregate([
+        ...groupPipeline,
+        { $count: "total" }
+      ])
+    ]);
 
-      if (response.data.status === 200 && response.data.chapters) {
-        const chapters = response.data.chapters;
-        
-        // Cache for 12 hours
-        await redisSet(cacheKey, JSON.stringify(chapters), 43200);
-        
-        return chapters;
-      }
-    } catch (apiError) {
-      logger.warn(`Hadith API failed for chapters ${bookSlug}, falling back to database:`, apiError);
-      // Fall through to database fallback
-    }
+    const total = totalResult[0]?.total || 0;
 
-    // Fallback to database
-    const chapters = await Hadith.distinct('chapter', { collectionName: bookSlug });
-    const transformedChapters: HadithApiChapter[] = chapters.map((chapter, index) => ({
-      id: index + 1,
-      chapterNumber: (index + 1).toString(),
-      chapterEnglish: chapter,
+    const transformedChapters: HadithApiChapter[] = chaptersData.map((ch, index) => ({
+      id: ch.bookNumber || skip + index + 1,
+      chapterNumber: (ch.bookNumber || skip + index + 1).toString(),
+      chapterEnglish: ch._id,
       chapterUrdu: '',
       chapterArabic: '',
       bookSlug,
     }));
 
+    const result = {
+      chapters: transformedChapters,
+      pagination: {
+        current_page: currentPage,
+        last_page: Math.ceil(total / limit),
+        per_page: limit,
+        total,
+        from: skip + 1,
+        to: Math.min(skip + limit, total),
+      }
+    };
+
     if (transformedChapters.length > 0) {
-      await redisSet(cacheKey, JSON.stringify(transformedChapters), 3600);
-      logger.info(`Fetched ${transformedChapters.length} chapters from database (fallback)`);
-      return transformedChapters;
+      await redisSet(cacheKey, JSON.stringify(result), 3600);
     }
 
-    return [];
+    return result;
   } catch (error) {
     logger.error(`Get chapters for ${bookSlug} error:`, error);
-    return [];
+    return {
+      chapters: [],
+      pagination: {
+        current_page: 1,
+        last_page: 1,
+        per_page: paginate || 25,
+        total: 0,
+        from: 0,
+        to: 0
+      }
+    };
   }
 };
 
-// Get hadiths with filters - with fallback
+// Get hadiths with filters
 export const getHadiths = async (filters: {
   hadithEnglish?: string;
   hadithUrdu?: string;
@@ -244,7 +252,7 @@ export const getHadiths = async (filters: {
   pagination: HadithPagination;
 }> => {
   try {
-    const cacheKey = `hadith:search:${JSON.stringify(filters)}`;
+    const cacheKey = `hadith:search:${JSON.stringify(filters)}:v2`;
     
     // Check cache (only for non-search queries)
     if (!filters.hadithEnglish && !filters.hadithUrdu && !filters.hadithArabic) {
@@ -254,57 +262,6 @@ export const getHadiths = async (filters: {
       }
     }
 
-    // Try API first
-    try {
-      const params: Record<string, string | number> = { apiKey: HADITH_API_KEY };
-      if (filters.hadithEnglish) params.hadithEnglish = filters.hadithEnglish;
-      if (filters.hadithUrdu) params.hadithUrdu = filters.hadithUrdu;
-      if (filters.hadithArabic) params.hadithArabic = filters.hadithArabic;
-      if (filters.hadithNumber) params.hadithNumber = filters.hadithNumber;
-      if (filters.book) params.book = filters.book;
-      if (filters.chapter) params.chapter = filters.chapter;
-      if (filters.status) params.status = filters.status;
-      if (filters.paginate) params.paginate = filters.paginate;
-      if (filters.page) params.page = filters.page;
-
-      type HadithsResponse = HadithApiResponse & {
-        hadiths: {
-          data: HadithApiHadith[];
-          pagination: HadithPagination;
-        };
-      };
-      const response = await axios.get<HadithsResponse>(
-        `${HADITH_API_BASE}/hadiths/`,
-        { params, timeout: 5000 }
-      );
-
-      if (response.data.status === 200 && response.data.hadiths) {
-        const hadithsData = response.data.hadiths;
-        const result = {
-          hadiths: hadithsData.data || [],
-          pagination: hadithsData.pagination || {
-            current_page: 1,
-            last_page: 1,
-            per_page: 25,
-            total: hadithsData.data?.length || 0,
-            from: 1,
-            to: hadithsData.data?.length || 0,
-          },
-        };
-        
-        // Cache for 12 hours (only for non-search queries)
-        if (!filters.hadithEnglish && !filters.hadithUrdu && !filters.hadithArabic) {
-          await redisSet(cacheKey, JSON.stringify(result), 43200);
-        }
-        
-        return result;
-      }
-    } catch (apiError) {
-      logger.warn('Hadith API failed, falling back to database:', apiError);
-      // Fall through to database fallback
-    }
-
-    // Fallback to database
     const query: Record<string, unknown> = {};
 
     if (filters.book) {
@@ -312,7 +269,11 @@ export const getHadiths = async (filters: {
     }
 
     if (filters.chapter) {
-      query.chapter = { $regex: filters.chapter, $options: 'i' };
+      if (!isNaN(Number(filters.chapter))) {
+        query.bookNumber = Number(filters.chapter);
+      } else {
+        query.book = { $regex: filters.chapter, $options: 'i' };
+      }
     }
 
     if (filters.hadithNumber) {
@@ -341,7 +302,7 @@ export const getHadiths = async (filters: {
 
     const [hadiths, total] = await Promise.all([
       Hadith.find(query)
-        .sort({ hadithNumber: 1 })
+        .sort({ bookNumber: 1, hadithNumber: 1 }) 
         .skip(skip)
         .limit(perPage)
         .lean(),
@@ -362,77 +323,31 @@ export const getHadiths = async (filters: {
       },
     };
 
-    // Cache for 1 hour (shorter cache for fallback data)
     if (!filters.hadithEnglish && !filters.hadithUrdu && !filters.hadithArabic) {
       await redisSet(cacheKey, JSON.stringify(result), 3600);
     }
 
-    logger.info(`Fetched ${transformedHadiths.length} hadiths from database (fallback)`);
     return result;
   } catch (error) {
-    logger.error('Get hadiths from Hadith API error:', error);
+    logger.error('Get hadiths error:', error);
     throw error;
   }
 };
 
-// Get hadith by ID - with fallback
+// Get hadith by ID
 export const getHadithById = async (id: number): Promise<HadithApiHadith | null> => {
   try {
-    const cacheKey = `hadith:id:${id}`;
+    const cacheKey = `hadith:id:${id}:v2`;
     const cached = await redisGet(cacheKey);
     if (cached) {
       return JSON.parse(cached);
     }
 
-    // Try API first
-    try {
-      // Try to get by ID first (if endpoint exists)
-      try {
-        const response = await axios.get<HadithApiResponse & { hadith: HadithApiHadith }>(
-          `${HADITH_API_BASE}/hadiths/${id}`,
-          { 
-            params: { apiKey: HADITH_API_KEY },
-            timeout: 5000,
-          }
-        );
-
-        if (response.data.status === 200 && response.data.hadith) {
-          const hadith = response.data.hadith;
-          await redisSet(cacheKey, JSON.stringify(hadith), 86400);
-          return hadith;
-        }
-      } catch (error: unknown) {
-        if (axios.isAxiosError(error) && error.response?.status === 404) {
-          logger.debug(`Hadith ID endpoint not found, trying search for ID ${id}`);
-        } else {
-          throw error;
-        }
-      }
-
-      // Fallback: Search for hadith by ID (treating ID as hadithNumber)
-      const searchResult = await getHadiths({
-        hadithNumber: id.toString(),
-        paginate: 1,
-      });
-
-      if (searchResult.hadiths.length > 0) {
-        const hadith = searchResult.hadiths[0];
-        await redisSet(cacheKey, JSON.stringify(hadith), 86400);
-        return hadith;
-      }
-    } catch (apiError) {
-      logger.warn(`Hadith API failed for ID ${id}, falling back to database:`, apiError);
-      // Fall through to database fallback
-    }
-
-    // Fallback to database
-    // Try to find by hadithNumber first (since API IDs might not match MongoDB IDs)
-    const hadith = await Hadith.findOne({ hadithNumber: id.toString() });
+    let hadith = await Hadith.findOne({ hadithNumber: id.toString() });
     
     if (hadith) {
       const transformed = transformHadithToApiFormat(hadith);
       await redisSet(cacheKey, JSON.stringify(transformed), 86400);
-      logger.info(`Fetched hadith ${id} from database (fallback)`);
       return transformed;
     }
 

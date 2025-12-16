@@ -2134,7 +2134,7 @@
             "required": false,
             "schema": {
               "type": "integer",
-              "default": 2
+              "default": 1
             },
             "description": "Calculation method (1-15)"
           }
@@ -2197,7 +2197,7 @@
             "required": false,
             "schema": {
               "type": "integer",
-              "default": 2
+              "default": 1
             }
           }
         ],
@@ -2272,7 +2272,7 @@
             "required": false,
             "schema": {
               "type": "integer",
-              "default": 2
+              "default": 1
             }
           }
         ],
@@ -2323,6 +2323,16 @@
               "type": "number",
               "format": "float"
             }
+          },
+          {
+            "in": "query",
+            "name": "method",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 1
+            },
+            "description": "Calculation method (1-15)"
           }
         ],
         "responses": {

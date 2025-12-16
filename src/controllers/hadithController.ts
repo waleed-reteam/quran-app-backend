@@ -168,14 +168,15 @@ export const searchHadiths = async (req: Request, res: Response): Promise<void> 
 export const getChapters = async (req: Request, res: Response): Promise<void> => {
   try {
     const { bookSlug } = req.params;
-    const { paginate } = req.query;
+    const { paginate, page } = req.query;
 
-    const chapters = await getChaptersByBook(
+    const result = await getChaptersByBook(
       bookSlug,
-      paginate ? Number(paginate) : undefined
+      paginate ? Number(paginate) : undefined,
+      page ? Number(page) : undefined
     );
 
-    const transformedChapters = chapters.map(chapter => ({
+    const transformedChapters = result.chapters.map(chapter => ({
       id: chapter.id,
       chapterNumber: chapter.chapterNumber,
       chapterEnglish: chapter.chapterEnglish,
@@ -187,7 +188,7 @@ export const getChapters = async (req: Request, res: Response): Promise<void> =>
     res.status(200).json({
       success: true,
       data: transformedChapters,
-      count: transformedChapters.length,
+      pagination: result.pagination,
     });
   } catch (error) {
     logger.error('Get chapters error:', error);

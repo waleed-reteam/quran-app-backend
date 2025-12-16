@@ -1,4 +1,5 @@
-import axios from 'axios';
+import fs from 'fs';
+import path from 'path';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
 import Hadith from '../models/mongodb/Hadith';
@@ -6,14 +7,24 @@ import logger from '../utils/logger';
 
 dotenv.config();
 
-const HADITH_API_BASE = 'https://hadithapi.com/api';
-const HADITH_API_KEY = process.env.HADITH_API_KEY || '$2y$10$unZvEIUjLokiEp5auSAYpe6uqmglNe17sOkYbSi62ibUEqVdPNyS';
+const DATA_DIR = path.join(__dirname, '../data/hadiths');
+
+const FILES_MAP: { [key: string]: string } = {
+  'sahih-bukhari': 'sahih-bukhari.json',
+  'sahih-muslim': 'sahih-muslim.json',
+  'sunan-an-nasai': 'sunan-an-nasai.json',
+  'sunan-abu-dawud': 'sunan-abu-dawud.json',
+  'jami-at-tirmidhi': 'jami-at-tirmidhi.json',
+  'sunan-ibn-majah': 'sunan-ibn-majah.json',
+  'muwatta-malik': 'muwatta-malik.json',
+  'musnad-ahmad': 'musnad-ahmad.json',
+  'sunan-darimi': 'sunan-darimi.json',
+};
 
 /**
  * Hadith Seeding Script
  * 
- * Fetches Hadith data from Hadith API and stores it in MongoDB
- * as a fallback mechanism. This ensures the app can work even if the API is down.
+ * Reads Hadith data from local JSON files and stores it in MongoDB.
  */
 const seedHadiths = async () => {
   try {
@@ -26,140 +37,82 @@ const seedHadiths = async () => {
     await Hadith.deleteMany({});
     logger.info('Cleared existing hadiths');
 
-    // Fetch books from API with retry logic
-    logger.info('Fetching books from Hadith API...');
-    let booksResponse: any;
-    let retries = 3;
-    while (retries > 0) {
-      try {
-        booksResponse = await axios.get(`${HADITH_API_BASE}/books`, {
-          params: { apiKey: HADITH_API_KEY },
-          timeout: 10000, // 10 second timeout
-        });
-        if (booksResponse && booksResponse.data.status === 200 && booksResponse.data.books) {
-          break;
-        } else {
-          throw new Error('Invalid response from Hadith API');
-        }
-      } catch (error: any) {
-        retries--;
-        if (retries === 0) {
-          logger.error('Failed to fetch books from Hadith API after 3 retries:', error.message);
-          throw error;
-        }
-        logger.warn(`Failed to fetch books, retrying... (${retries} attempts left)`);
-        await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds before retry
-      }
-    }
-
-    if (!booksResponse || !booksResponse.data.books) {
-      throw new Error('Failed to fetch books from Hadith API');
-    }
-
-    const books = booksResponse.data.books;
-    logger.info(`Found ${books.length} hadith collections`);
-
     let totalHadiths = 0;
 
-    // Fetch hadiths from each collection
-    for (const book of books) {
+    for (const [collectionName, filename] of Object.entries(FILES_MAP)) {
+      const filePath = path.join(DATA_DIR, filename);
+      
+      if (!fs.existsSync(filePath)) {
+        logger.warn(`File not found: ${filename}, skipping...`);
+        continue;
+      }
+
+      logger.info(`Processing ${collectionName} from ${filename}...`);
+
       try {
-        logger.info(`Fetching hadiths from ${book.bookName}...`);
+        const fileContent = fs.readFileSync(filePath, 'utf-8');
+        const data = JSON.parse(fileContent);
         
-        let page = 1;
-        const perPage = 25;
-        let hasMore = true;
-        let collectionCount = 0;
-        const maxPages = 100; // Limit to avoid too many API calls (2500 hadiths per collection)
-
-        while (hasMore && page <= maxPages) {
-          let hadithsResponse;
-          let requestRetries = 3;
-          let requestSuccess = false;
-          
-          while (requestRetries > 0 && !requestSuccess) {
-            try {
-              hadithsResponse = await axios.get(`${HADITH_API_BASE}/hadiths/`, {
-                params: {
-                  apiKey: HADITH_API_KEY,
-                  book: book.bookSlug,
-                  paginate: perPage,
-                  page,
-                },
-                timeout: 10000, // 10 second timeout
-              });
-
-              if (hadithsResponse.data.status === 200 && hadithsResponse.data.hadiths) {
-                requestSuccess = true;
-              } else if (hadithsResponse.data.status === 404) {
-                // 404 means no more hadiths for this book
-                logger.info(`No more hadiths found for ${book.bookName} at page ${page}`);
-                hasMore = false;
-                break;
-              } else {
-                throw new Error(`Invalid response: status ${hadithsResponse.data.status}`);
-              }
-            } catch (error: any) {
-              requestRetries--;
-              if (requestRetries === 0) {
-                logger.warn(`Failed to fetch hadiths from ${book.bookName}, page ${page} after 3 retries:`, error.message);
-                hasMore = false;
-                break;
-              } else {
-                logger.warn(`Failed to fetch hadiths from ${book.bookName}, page ${page}, retrying... (${requestRetries} attempts left)`);
-                await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds before retry
-              }
-            }
-          }
-          
-          if (!requestSuccess || !hadithsResponse) {
-            break;
-          }
-
-          const hadithsData = hadithsResponse.data.hadiths;
-          const hadiths = hadithsData.data || [];
-
-          // Transform and insert hadiths
-          const hadithsToInsert = hadiths.map((apiHadith: any) => ({
-            collectionName: apiHadith.bookSlug,
-            book: apiHadith.book?.bookName || book.bookName,
-            bookNumber: apiHadith.book?.id || book.id,
-            hadithNumber: apiHadith.hadithNumber,
-            chapter: apiHadith.chapter?.chapterEnglish || '',
-            chapterNumber: apiHadith.chapter?.chapterNumber ? parseInt(apiHadith.chapter.chapterNumber) : undefined,
-            arabicText: apiHadith.hadithArabic || '',
-            englishText: apiHadith.hadithEnglish || '',
-            urduText: apiHadith.hadithUrdu || '',
-            grade: apiHadith.status || '',
-            narrator: apiHadith.englishNarrator || '',
-            tags: extractTags(apiHadith.hadithEnglish || ''),
-          }));
-
-          if (hadithsToInsert.length > 0) {
-            await Hadith.insertMany(hadithsToInsert);
-            collectionCount += hadithsToInsert.length;
-            totalHadiths += hadithsToInsert.length;
-          }
-
-          hasMore = hadithsData.current_page < hadithsData.last_page;
-          page++;
-
-          // Log progress every 10 pages
-          if (page % 10 === 0) {
-            logger.info(`  Processed ${collectionCount} hadiths from ${book.bookName}...`);
-          }
+        // Create a map of chapters for quick lookup
+        const chaptersMap = new Map();
+        if (data.chapters) {
+          data.chapters.forEach((ch: any) => {
+            chaptersMap.set(ch.id, ch);
+          });
         }
 
-        logger.info(`✅ Inserted ${collectionCount} hadiths from ${book.bookName}`);
-      } catch (error) {
-        logger.error(`Error processing ${book.bookName}:`, error);
+        const hadiths = data.hadiths || [];
+        const hadithsToInsert = [];
+
+        for (const hadith of hadiths) {
+          const chapterData = chaptersMap.get(hadith.chapterId);
+          const bookName = chapterData ? chapterData.english : (data.metadata?.english?.title || collectionName);
+          
+          // Skip if no English text, or provide placeholder if you prefer. 
+          // For now, let's skip if both Arabic and English are missing, 
+          // but if only English is missing, maybe use Arabic or placeholder?
+          // The schema requires englishText.
+          const englishText = hadith.english?.text && hadith.english.text.trim().length > 0 
+            ? hadith.english.text 
+            : (hadith.arabic || 'Translation not available');
+
+          if (!englishText) continue; // Skip if absolutely no text
+
+          hadithsToInsert.push({
+            collectionName,
+            book: bookName || 'Unknown Book',
+            bookNumber: hadith.bookId || hadith.chapterId || 0,
+            hadithNumber: String(hadith.idInBook),
+            chapter: bookName || 'General', // Use Book name as Chapter if no specific chapter
+            chapterNumber: undefined,
+            arabicText: hadith.arabic || '',
+            englishText: englishText,
+            urduText: '',
+            grade: '',
+            narrator: hadith.english?.narrator || '',
+            tags: extractTags(englishText),
+          });
+        }
+
+        // Insert in batches to avoid memory issues
+        const BATCH_SIZE = 1000;
+        for (let i = 0; i < hadithsToInsert.length; i += BATCH_SIZE) {
+          const batch = hadithsToInsert.slice(i, i + BATCH_SIZE);
+          await Hadith.insertMany(batch);
+          logger.info(`  Inserted batch ${Math.floor(i / BATCH_SIZE) + 1} (${batch.length} hadiths)`);
+        }
+
+        totalHadiths += hadithsToInsert.length;
+        logger.info(`✅ Inserted ${hadithsToInsert.length} hadiths for ${collectionName}`);
+
+      } catch (err) {
+        logger.error(`Error processing ${filename}:`, err);
       }
     }
 
     logger.info('');
     logger.info('✨ Successfully seeded Hadith data into MongoDB!');
     logger.info(`   Total: ${totalHadiths} hadiths`);
-    logger.info('   This data will be used as fallback if API is unavailable.');
     
     process.exit(0);
   } catch (error) {
@@ -171,6 +124,8 @@ const seedHadiths = async () => {
 // Extract tags from hadith text
 const extractTags = (text: string): string[] => {
   const tags: string[] = [];
+  if (!text) return tags;
+  
   const lowerText = text.toLowerCase();
 
   const keywords = [

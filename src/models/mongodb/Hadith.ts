@@ -23,14 +23,14 @@ const HadithSchema = new Schema<IHadith>(
     collectionName: { 
       type: String, 
       required: true,
-      enum: ['sahih-bukhari', 'sahih-muslim', 'sunan-abu-dawud', 'jami-at-tirmidhi', 'sunan-an-nasai', 'sunan-ibn-majah', 'muwatta-malik', 'musnad-ahmad', 'riyadh-as-salihin']
+      enum: ['sahih-bukhari', 'sahih-muslim', 'sunan-abu-dawud', 'jami-at-tirmidhi', 'sunan-an-nasai', 'sunan-ibn-majah', 'muwatta-malik', 'musnad-ahmad', 'sunan-darimi', 'riyadh-as-salihin']
     },
     book: { type: String, required: true },
     bookNumber: { type: Number, required: true },
     hadithNumber: { type: String, required: true },
     chapter: { type: String, required: true },
     chapterNumber: { type: Number },
-    arabicText: { type: String, required: true },
+    arabicText: { type: String },
     englishText: { type: String, required: true },
     urduText: { type: String },
     grade: { type: String },

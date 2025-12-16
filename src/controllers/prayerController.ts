@@ -9,7 +9,7 @@ const ALADHAN_API = process.env.ALADHAN_API_URL || 'https://api.aladhan.com/v1';
 
 export const getPrayerTimes = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { latitude, longitude, date, method = 2, school = 0 } = req.query;
+    const { latitude, longitude, date, method = 1, school = 0 } = req.query;
 
     if (!latitude || !longitude) {
       res.status(400).json({
@@ -89,7 +89,7 @@ export const getPrayerTimes = async (req: AuthRequest, res: Response): Promise<v
 
 export const getPrayerTimesByCity = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { city, country, date, method = 2, school = 0 } = req.query;
+    const { city, country, date, method = 1, school = 0 } = req.query;
 
     if (!city || !country) {
       res.status(400).json({
@@ -149,7 +149,7 @@ export const getPrayerTimesByCity = async (req: AuthRequest, res: Response): Pro
 
 export const getMonthlyPrayerTimes = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { latitude, longitude, month, year, method = 2, school = 0 } = req.query;
+    const { latitude, longitude, month, year, method = 1, school = 0 } = req.query;
 
     if (!latitude || !longitude || !month || !year) {
       res.status(400).json({
@@ -202,7 +202,7 @@ export const getMonthlyPrayerTimes = async (req: AuthRequest, res: Response): Pr
 
 export const getNextPrayer = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { latitude, longitude, method = 2, school = 0 } = req.query;
+    const { latitude, longitude, method = 1, school = 0 } = req.query;
 
     if (!latitude || !longitude) {
       res.status(400).json({
@@ -224,15 +224,44 @@ export const getNextPrayer = async (req: Request, res: Response): Promise<void> 
       },
     });
 
-    const timings = response.data.data.timings;
+    let timings = response.data.data.timings;
+    let meta = response.data.data.meta;
+    // let dateData = response.data.data.date;
+    
+    // Get current time in the location's timezone
+    const timeZone = meta.timezone || 'UTC';
     const now = new Date();
-    const currentTime = now.getHours() * 60 + now.getMinutes();
+    
+    // Create a date object for the location's current time
+    const locationDateString = now.toLocaleString('en-US', { timeZone });
+    const locationDate = new Date(locationDateString);
+    const locationDateIso = locationDate.toISOString().split('T')[0];
+
+    // Check if the location's date is different from the server's date (which was used for the initial fetch)
+    if (locationDateIso !== dateStr) {
+      // Re-fetch with the correct date
+      const correctResponse = await axios.get(`${ALADHAN_API}/timings/${locationDateIso}`, {
+        params: {
+          latitude,
+          longitude,
+          method,
+          school,
+        },
+      });
+      timings = correctResponse.data.data.timings;
+      meta = correctResponse.data.data.meta;
+      // dateData = correctResponse.data.data.date;
+    }
+    
+    const currentTime = locationDate.getHours() * 60 + locationDate.getMinutes();
 
     const prayers = ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
     let nextPrayer = null;
 
     for (const prayer of prayers) {
-      const [hours, minutes] = timings[prayer].split(':').map(Number);
+      // Parse "HH:MM (EST)" or just "HH:MM"
+      const timeStr = timings[prayer].split(' ')[0];
+      const [hours, minutes] = timeStr.split(':').map(Number);
       const prayerTime = hours * 60 + minutes;
 
       if (prayerTime > currentTime) {
@@ -247,7 +276,8 @@ export const getNextPrayer = async (req: Request, res: Response): Promise<void> 
 
     // If no prayer found today, next is Fajr tomorrow
     if (!nextPrayer) {
-      const [hours, minutes] = timings.Fajr.split(':').map(Number);
+      const timeStr = timings.Fajr.split(' ')[0];
+      const [hours, minutes] = timeStr.split(':').map(Number);
       const minutesUntilMidnight = (24 * 60) - currentTime;
       const minutesAfterMidnight = hours * 60 + minutes;
       
@@ -263,6 +293,10 @@ export const getNextPrayer = async (req: Request, res: Response): Promise<void> 
       data: {
         nextPrayer,
         allTimings: timings,
+        meta: {
+          timezone: timeZone,
+          ...meta
+        }
       },
     });
   } catch (error) {
