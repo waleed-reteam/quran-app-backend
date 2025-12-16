@@ -101,9 +101,9 @@ const initializeServices = async (skipWait: boolean = false): Promise<void> => {
     try {
       logger.info('Starting service initialization...');
       
-      // Set a timeout for initialization (5 seconds - aggressive)
+      // Set a timeout for initialization (20 seconds - to match DB timeout)
       const initTimeout = new Promise<void>((_, reject) => {
-        setTimeout(() => reject(new Error('Initialization timeout')), 5000);
+        setTimeout(() => reject(new Error('Initialization timeout')), 20000);
       });
 
       await Promise.race([
@@ -113,7 +113,7 @@ const initializeServices = async (skipWait: boolean = false): Promise<void> => {
             await Promise.race([
               connectDatabases(),
               new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('Database connection timeout')), 3000)
+                setTimeout(() => reject(new Error('Database connection timeout')), 15000)
               )
             ]);
             logger.info('All databases connected');
@@ -174,10 +174,10 @@ const ensureInitialized = async (req: express.Request, res: express.Response, ne
   // Only wait if initialization is in progress and we haven't timed out
   if (initializationPromise && !initialized) {
     try {
-      // Wait max 3 seconds for initialization (increased from 2)
+      // Wait max 20 seconds for initialization (increased from 3)
       await Promise.race([
         initializationPromise,
-        new Promise(resolve => setTimeout(resolve, 3000))
+        new Promise(resolve => setTimeout(resolve, 20000))
       ]);
     } catch (error) {
       logger.warn('Initialization wait timeout, proceeding anyway');

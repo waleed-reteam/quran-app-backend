@@ -34,9 +34,9 @@ export const connectMongoDB = async (): Promise<void> => {
     
     // Set connection options for serverless environments
     const connectionOptions = {
-      serverSelectionTimeoutMS: 5000, // 5 seconds timeout
+      serverSelectionTimeoutMS: 15000, // 15 seconds timeout
       socketTimeoutMS: 45000, // 45 seconds socket timeout
-      connectTimeoutMS: 5000, // 5 seconds connection timeout
+      connectTimeoutMS: 15000, // 15 seconds connection timeout
       maxPoolSize: 1, // Reduce pool size for serverless
       minPoolSize: 0,
     };

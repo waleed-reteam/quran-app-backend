@@ -154,86 +154,71 @@ export const getChaptersByBook = async (
   paginate?: number,
   page?: number
 ): Promise<{ chapters: HadithApiChapter[], pagination: HadithPagination }> => {
-  try {
-    const limit = paginate || 25;
-    const currentPage = page || 1;
-    const skip = (currentPage - 1) * limit;
-    
-    const cacheKey = `hadith:chapters:${bookSlug}:${limit}:${currentPage}:v2`;
-    
-    // Check cache
-    const cached = await redisGet(cacheKey);
-    if (cached) {
-      return JSON.parse(cached);
-    }
-
-    // Base pipeline for grouping
-    const groupPipeline = [
-      { $match: { collectionName: bookSlug } },
-      { $group: { 
-          _id: "$book", 
-          bookNumber: { $first: "$bookNumber" },
-          firstId: { $first: "$_id" } 
-        } 
-      },
-      { $sort: { bookNumber: 1 as 1 } }
-    ];
-
-    // Get total count and paginated data
-    const [chaptersData, totalResult] = await Promise.all([
-      Hadith.aggregate([
-        ...groupPipeline,
-        { $skip: skip },
-        { $limit: limit }
-      ]),
-      Hadith.aggregate([
-        ...groupPipeline,
-        { $count: "total" }
-      ])
-    ]);
-
-    const total = totalResult[0]?.total || 0;
-
-    const transformedChapters: HadithApiChapter[] = chaptersData.map((ch, index) => ({
-      id: ch.bookNumber || skip + index + 1,
-      chapterNumber: (ch.bookNumber || skip + index + 1).toString(),
-      chapterEnglish: ch._id,
-      chapterUrdu: '',
-      chapterArabic: '',
-      bookSlug,
-    }));
-
-    const result = {
-      chapters: transformedChapters,
-      pagination: {
-        current_page: currentPage,
-        last_page: Math.ceil(total / limit),
-        per_page: limit,
-        total,
-        from: skip + 1,
-        to: Math.min(skip + limit, total),
-      }
-    };
-
-    if (transformedChapters.length > 0) {
-      await redisSet(cacheKey, JSON.stringify(result), 3600);
-    }
-
-    return result;
-  } catch (error) {
-    logger.error(`Get chapters for ${bookSlug} error:`, error);
-    return {
-      chapters: [],
-      pagination: {
-        current_page: 1,
-        last_page: 1,
-        per_page: paginate || 25,
-        total: 0,
-        from: 0,
-        to: 0
-      }
-    };
+  const limit = paginate || 25;
+  const currentPage = page || 1;
+  const skip = (currentPage - 1) * limit;
+  
+  const cacheKey = `hadith:chapters:${bookSlug}:${limit}:${currentPage}:v2`;
+  
+  // Check cache
+  const cached = await redisGet(cacheKey);
+  if (cached) {
+    return JSON.parse(cached);
   }
+
+  // Base pipeline for grouping
+  const groupPipeline = [
+    { $match: { collectionName: bookSlug } },
+    { $group: { 
+        _id: "$book", 
+        bookNumber: { $first: "$bookNumber" },
+        firstId: { $first: "$_id" } 
+      } 
+    },
+    { $sort: { bookNumber: 1 as 1 } }
+  ];
+
+  // Get total count and paginated data
+  const [chaptersData, totalResult] = await Promise.all([
+    Hadith.aggregate([
+      ...groupPipeline,
+      { $skip: skip },
+      { $limit: limit }
+    ]),
+    Hadith.aggregate([
+      ...groupPipeline,
+      { $count: "total" }
+    ])
+  ]);
+
+  const total = totalResult[0]?.total || 0;
+
+  const transformedChapters: HadithApiChapter[] = chaptersData.map((ch, index) => ({
+    id: ch.bookNumber || skip + index + 1,
+    chapterNumber: (ch.bookNumber || skip + index + 1).toString(),
+    chapterEnglish: ch._id,
+    chapterUrdu: '',
+    chapterArabic: '',
+    bookSlug,
+  }));
+
+  const result = {
+    chapters: transformedChapters,
+    pagination: {
+      current_page: currentPage,
+      last_page: Math.ceil(total / limit),
+      per_page: limit,
+      total,
+      from: skip + 1,
+      to: Math.min(skip + limit, total),
+    }
+  };
+
+  if (transformedChapters.length > 0) {
+    await redisSet(cacheKey, JSON.stringify(result), 3600);
+  }
+
+  return result;
 };
 
 // Get hadiths with filters
