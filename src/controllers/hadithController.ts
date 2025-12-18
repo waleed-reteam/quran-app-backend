@@ -6,6 +6,7 @@ import {
   getHadiths,
   getHadithById as getHadithByIdFromApi,
   transformHadith,
+  getChapterNameBySequentialId,
 } from '../services/hadithApiService';
 
 export const getAllCollections = async (_req: Request, res: Response): Promise<void> => {
@@ -120,15 +121,25 @@ export const searchHadiths = async (req: Request, res: Response): Promise<void> 
       return;
     }
 
-    const filters: any = {
+    const filters: {
+      paginate: number;
+      page: number;
+      book?: string;
+      status?: 'Sahih' | 'Hasan' | "Da`eef";
+      chapter?: string;
+      hadithNumber?: string;
+      hadithEnglish?: string;
+      hadithUrdu?: string;
+      hadithArabic?: string;
+    } = {
       paginate: Number(limit),
       page: Number(page),
     };
 
-    if (collection) filters.book = collection;
-    if (status) filters.status = status;
-    if (chapter) filters.chapter = chapter;
-    if (hadithNumber) filters.hadithNumber = hadithNumber;
+    if (collection) filters.book = collection as string;
+    if (status) filters.status = status as 'Sahih' | 'Hasan' | "Da`eef";
+    if (chapter) filters.chapter = chapter as string;
+    if (hadithNumber) filters.hadithNumber = hadithNumber as string;
 
     // Text search based on language
     if (query) {
@@ -204,9 +215,28 @@ export const getHadithsByChapter = async (req: Request, res: Response): Promise<
     const { bookSlug, chapterNumber } = req.params;
     const { page = 1, limit = 25 } = req.query;
 
+    // Convert chapterNumber (sequential ID) to chapter name
+    const sequentialId = parseInt(chapterNumber);
+    if (isNaN(sequentialId) || sequentialId < 1) {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid chapter number',
+      });
+      return;
+    }
+
+    const chapterName = await getChapterNameBySequentialId(bookSlug, sequentialId);
+    if (!chapterName) {
+      res.status(404).json({
+        success: false,
+        message: 'Chapter not found',
+      });
+      return;
+    }
+
     const result = await getHadiths({
       book: bookSlug,
-      chapter: chapterNumber,
+      chapter: chapterName,
       paginate: Number(limit),
       page: Number(page),
     });

@@ -1,6 +1,6 @@
 import logger from '../utils/logger';
 import { redisGet, redisSet } from '../config/database';
-import Hadith from '../models/mongodb/Hadith';
+import Hadith, { IHadith } from '../models/mongodb/Hadith';
 
 // Collection Display Names Mapping
 const COLLECTION_NAMES: { [key: string]: string } = {
@@ -63,7 +63,8 @@ interface HadithPagination {
 }
 
 // Helper to transform MongoDB hadith to API format
-const transformHadithToApiFormat = (hadith: any): HadithApiHadith => {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const transformHadithToApiFormat = (hadith: IHadith | any): HadithApiHadith => {
   const id = parseInt(hadith.hadithNumber) || 
              (hadith._id && typeof hadith._id === 'object' && 'toString' in hadith._id 
                ? parseInt(hadith._id.toString().slice(-8), 16) 
@@ -148,7 +149,67 @@ export const getBooks = async (): Promise<HadithApiBook[]> => {
   }
 };
 
-// Get chapters by book slug (Returns Kitabs as Chapters)
+// Helper function to get sorted chapters for a book (sorted by minimum hadithNumber in each chapter)
+const getSortedChaptersForBook = async (bookSlug: string): Promise<string[]> => {
+  const cacheKey = `hadith:sorted-chapters:${bookSlug}:v2`;
+  const cached = await redisGet(cacheKey);
+  if (cached) {
+    return JSON.parse(cached);
+  }
+
+  // Get chapters sorted by the minimum hadithNumber in each chapter
+  const chaptersWithMinHadith = await Hadith.aggregate([
+    { $match: { collectionName: bookSlug } },
+    {
+      $addFields: {
+        hadithNumberNum: {
+          $cond: {
+            if: { $eq: [{ $type: "$hadithNumber" }, "string"] },
+            then: {
+              $ifNull: [
+                {
+                  $convert: {
+                    input: "$hadithNumber",
+                    to: "int",
+                    onError: 999999,
+                    onNull: 999999
+                  }
+                },
+                999999
+              ]
+            },
+            else: { $ifNull: ["$hadithNumber", 999999] }
+          }
+        }
+      }
+    },
+    {
+      $group: {
+        _id: "$chapter",
+        minHadithNumber: { $min: "$hadithNumberNum" }
+      }
+    },
+    { $sort: { minHadithNumber: 1 } },
+    { $project: { _id: 1 } }
+  ]);
+
+  const sortedChapters = chaptersWithMinHadith.map(item => item._id);
+  
+  await redisSet(cacheKey, JSON.stringify(sortedChapters), 3600);
+  return sortedChapters;
+};
+
+// Get chapter name by sequential ID
+export const getChapterNameBySequentialId = async (
+  bookSlug: string,
+  sequentialId: number
+): Promise<string | null> => {
+  const sortedChapters = await getSortedChaptersForBook(bookSlug);
+  const index = sequentialId - 1; // Convert to 0-based index
+  return sortedChapters[index] || null;
+};
+
+// Get chapters by book slug (Returns unique chapters from chapter field)
 export const getChaptersByBook = async (
   bookSlug: string,
   paginate?: number,
@@ -158,7 +219,7 @@ export const getChaptersByBook = async (
   const currentPage = page || 1;
   const skip = (currentPage - 1) * limit;
   
-  const cacheKey = `hadith:chapters:${bookSlug}:${limit}:${currentPage}:v2`;
+  const cacheKey = `hadith:chapters:${bookSlug}:${limit}:${currentPage}:v4`;
   
   // Check cache
   const cached = await redisGet(cacheKey);
@@ -166,37 +227,17 @@ export const getChaptersByBook = async (
     return JSON.parse(cached);
   }
 
-  // Base pipeline for grouping
-  const groupPipeline = [
-    { $match: { collectionName: bookSlug } },
-    { $group: { 
-        _id: "$book", 
-        bookNumber: { $first: "$bookNumber" },
-        firstId: { $first: "$_id" } 
-      } 
-    },
-    { $sort: { bookNumber: 1 as 1 } }
-  ];
+  // Get distinct chapters from the chapter field, sorted alphabetically
+  const sortedChapters = await getSortedChaptersForBook(bookSlug);
 
-  // Get total count and paginated data
-  const [chaptersData, totalResult] = await Promise.all([
-    Hadith.aggregate([
-      ...groupPipeline,
-      { $skip: skip },
-      { $limit: limit }
-    ]),
-    Hadith.aggregate([
-      ...groupPipeline,
-      { $count: "total" }
-    ])
-  ]);
+  const total = sortedChapters.length;
+  const paginatedChapters = sortedChapters.slice(skip, skip + limit);
 
-  const total = totalResult[0]?.total || 0;
-
-  const transformedChapters: HadithApiChapter[] = chaptersData.map((ch, index) => ({
-    id: ch.bookNumber || skip + index + 1,
-    chapterNumber: (ch.bookNumber || skip + index + 1).toString(),
-    chapterEnglish: ch._id,
+  // Map chapters with sequential IDs starting from 1
+  const transformedChapters: HadithApiChapter[] = paginatedChapters.map((chapterName, index) => ({
+    id: skip + index + 1, // Sequential ID starting from 1 for the entire collection
+    chapterNumber: (skip + index + 1).toString(),
+    chapterEnglish: chapterName,
     chapterUrdu: '',
     chapterArabic: '',
     bookSlug,
@@ -254,11 +295,8 @@ export const getHadiths = async (filters: {
     }
 
     if (filters.chapter) {
-      if (!isNaN(Number(filters.chapter))) {
-        query.bookNumber = Number(filters.chapter);
-      } else {
-        query.book = { $regex: filters.chapter, $options: 'i' };
-      }
+      // Match by chapter name (exact match)
+      query.chapter = filters.chapter;
     }
 
     if (filters.hadithNumber) {
@@ -285,14 +323,47 @@ export const getHadiths = async (filters: {
     const perPage = filters.paginate || 25;
     const skip = (page - 1) * perPage;
 
-    const [hadiths, total] = await Promise.all([
-      Hadith.find(query)
-        .sort({ bookNumber: 1, hadithNumber: 1 }) 
-        .skip(skip)
-        .limit(perPage)
-        .lean(),
+    // Use aggregation to sort hadithNumber numerically
+    const [hadithsResult, totalResult] = await Promise.all([
+      Hadith.aggregate([
+        { $match: query },
+        {
+          $addFields: {
+            hadithNumberNum: {
+              $cond: {
+                if: { $eq: [{ $type: "$hadithNumber" }, "string"] },
+                then: {
+                  $ifNull: [
+                    {
+                      $convert: {
+                        input: "$hadithNumber",
+                        to: "int",
+                        onError: 0,
+                        onNull: 0
+                      }
+                    },
+                    0
+                  ]
+                },
+                else: { $ifNull: ["$hadithNumber", 0] }
+              }
+            }
+          }
+        },
+        { $sort: { hadithNumberNum: 1 } },
+        { $skip: skip },
+        { $limit: perPage },
+        {
+          $project: {
+            hadithNumberNum: 0 // Remove the temporary field
+          }
+        }
+      ]),
       Hadith.countDocuments(query),
     ]);
+
+    const hadiths = hadithsResult;
+    const total = totalResult;
 
     const transformedHadiths = hadiths.map(transformHadithToApiFormat);
 
@@ -328,7 +399,7 @@ export const getHadithById = async (id: number): Promise<HadithApiHadith | null>
       return JSON.parse(cached);
     }
 
-    let hadith = await Hadith.findOne({ hadithNumber: id.toString() });
+    const hadith = await Hadith.findOne({ hadithNumber: id.toString() });
     
     if (hadith) {
       const transformed = transformHadithToApiFormat(hadith);
