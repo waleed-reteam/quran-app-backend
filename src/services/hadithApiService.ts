@@ -1,6 +1,8 @@
 import logger from '../utils/logger';
 import { redisGet, redisSet } from '../config/database';
 import Hadith, { IHadith } from '../models/mongodb/Hadith';
+import fs from 'fs';
+import path from 'path';
 
 // Collection Display Names Mapping
 const COLLECTION_NAMES: { [key: string]: string } = {
@@ -14,6 +16,116 @@ const COLLECTION_NAMES: { [key: string]: string } = {
   'musnad-ahmad': 'Musnad Ahmad',
   'sunan-darimi': 'Sunan ad-Darimi',
   'riyadh-as-salihin': 'Riyad as-Salihin',
+};
+
+// Author information mapping (from JSON metadata)
+interface AuthorInfo {
+  writerName: string;
+  writerDeath: string;
+  aboutWriter: string | null;
+}
+
+// Static author information mapping based on JSON metadata
+const AUTHOR_INFO: { [key: string]: AuthorInfo } = {
+  'sahih-bukhari': {
+    writerName: 'Imam Muhammad ibn Ismail al-Bukhari',
+    writerDeath: '256 AH',
+    aboutWriter: null,
+  },
+  'sahih-muslim': {
+    writerName: 'Imam Muslim ibn al-Hajjaj al-Naysaburi',
+    writerDeath: '261 AH',
+    aboutWriter: null,
+  },
+  'sunan-an-nasai': {
+    writerName: 'Imam Ahmad ibn Shu\'ayb al-Nasa\'i',
+    writerDeath: '303 AH',
+    aboutWriter: null,
+  },
+  'sunan-abu-dawud': {
+    writerName: 'Imam Sulayman ibn al-Ash\'ath Abu Dawud al-Sijistani',
+    writerDeath: '275 AH',
+    aboutWriter: null,
+  },
+  'jami-at-tirmidhi': {
+    writerName: 'Imam Abu Isa Muhammad ibn Isa al-Tirmidhi',
+    writerDeath: '279 AH',
+    aboutWriter: null,
+  },
+  'sunan-ibn-majah': {
+    writerName: 'Imam Muhammad ibn Yazid Ibn Majah al-Qazwini',
+    writerDeath: '273 AH',
+    aboutWriter: null,
+  },
+  'muwatta-malik': {
+    writerName: 'Imam Malik ibn Anas',
+    writerDeath: '179 AH',
+    aboutWriter: null,
+  },
+  'musnad-ahmad': {
+    writerName: 'Imam Ahmad ibn Hanbal',
+    writerDeath: '241 AH',
+    aboutWriter: null,
+  },
+  'sunan-darimi': {
+    writerName: 'Imam Abu Muhammad Abd al-Rahman ibn Abd Allah ibn al-Darimi',
+    writerDeath: '255 AH',
+    aboutWriter: null,
+  },
+  'riyadh-as-salihin': {
+    writerName: 'Imam Abu Zakariya Yahya ibn Sharaf al-Nawawi',
+    writerDeath: '676 AH',
+    aboutWriter: null,
+  },
+};
+
+// Helper function to get author info from JSON metadata (with fallback to static mapping)
+const getAuthorInfo = (collectionName: string): AuthorInfo => {
+  // Get static mapping as base (includes death dates)
+  const staticInfo = AUTHOR_INFO[collectionName] || {
+    writerName: '',
+    writerDeath: '',
+    aboutWriter: null,
+  };
+
+  // Try to read from JSON file to get updated author name and introduction
+  const DATA_DIR = path.join(__dirname, '../data/hadiths');
+  const FILES_MAP: { [key: string]: string } = {
+    'sahih-bukhari': 'sahih-bukhari.json',
+    'sahih-muslim': 'sahih-muslim.json',
+    'sunan-an-nasai': 'sunan-an-nasai.json',
+    'sunan-abu-dawud': 'sunan-abu-dawud.json',
+    'jami-at-tirmidhi': 'jami-at-tirmidhi.json',
+    'sunan-ibn-majah': 'sunan-ibn-majah.json',
+    'muwatta-malik': 'muwatta-malik.json',
+    'musnad-ahmad': 'musnad-ahmad.json',
+    'sunan-darimi': 'sunan-darimi.json',
+  };
+
+  const filename = FILES_MAP[collectionName];
+  if (filename) {
+    const filePath = path.join(DATA_DIR, filename);
+    try {
+      if (fs.existsSync(filePath)) {
+        // Read JSON file to get metadata
+        const fileContent = fs.readFileSync(filePath, 'utf-8');
+        const data = JSON.parse(fileContent);
+        if (data.metadata && data.metadata.english) {
+          // Merge JSON metadata with static mapping (JSON has author name, static has death date)
+          return {
+            writerName: data.metadata.english.author || staticInfo.writerName,
+            writerDeath: staticInfo.writerDeath, // Death date from static mapping
+            aboutWriter: data.metadata.english.introduction || staticInfo.aboutWriter,
+          };
+        }
+      }
+    } catch (error) {
+      logger.warn(`Failed to read author info from ${filename}, using static mapping:`, error);
+    }
+  }
+
+  // Fallback to static mapping
+  return staticInfo;
 };
 
 interface HadithApiBook {
@@ -70,6 +182,9 @@ const transformHadithToApiFormat = (hadith: IHadith | any): HadithApiHadith => {
                ? parseInt(hadith._id.toString().slice(-8), 16) 
                : 0);
 
+  // Get author information for the collection
+  const authorInfo = getAuthorInfo(hadith.collectionName);
+
   return {
     id: id,
     hadithNumber: hadith.hadithNumber,
@@ -86,9 +201,9 @@ const transformHadithToApiFormat = (hadith: IHadith | any): HadithApiHadith => {
     book: {
       id: hadith.bookNumber || 0,
       bookName: COLLECTION_NAMES[hadith.collectionName] || hadith.collectionName,
-      writerName: '',
-      aboutWriter: null,
-      writerDeath: '',
+      writerName: authorInfo.writerName,
+      aboutWriter: authorInfo.aboutWriter,
+      writerDeath: authorInfo.writerDeath,
       bookSlug: hadith.collectionName,
       hadiths_count: '0',
       chapters_count: '0',
@@ -107,7 +222,7 @@ const transformHadithToApiFormat = (hadith: IHadith | any): HadithApiHadith => {
 // Get all books (Collections)
 export const getBooks = async (): Promise<HadithApiBook[]> => {
   try {
-    const cacheKey = 'hadith:books:v2';
+    const cacheKey = 'hadith:books:v3'; // Updated version to include author info
     
     // Check cache first
     const cached = await redisGet(cacheKey);
@@ -124,12 +239,15 @@ export const getBooks = async (): Promise<HadithApiBook[]> => {
       // We count unique "chapters" (which are actually Books/Kitabs in our new mapping)
       const chaptersCount = (await Hadith.distinct('book', { collectionName: collection })).length;
 
+      // Get author information
+      const authorInfo = getAuthorInfo(collection);
+
       books.push({
         id: i + 1, 
         bookName: COLLECTION_NAMES[collection] || collection,
-        writerName: '',
-        aboutWriter: null,
-        writerDeath: '',
+        writerName: authorInfo.writerName,
+        aboutWriter: authorInfo.aboutWriter,
+        writerDeath: authorInfo.writerDeath,
         bookSlug: collection,
         hadiths_count: hadithCount.toString(),
         chapters_count: chaptersCount.toString(),
